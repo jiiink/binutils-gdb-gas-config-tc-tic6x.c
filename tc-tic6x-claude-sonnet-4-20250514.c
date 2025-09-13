@@ -189,36 +189,29 @@ static void tic6x_output_unwinding (bool need_extab);
 /* Return the frame unwind state for the current function, allocating
    as necessary.  */
 
-static tic6x_unwind_info *tic6x_get_unwind(void)
+static tic6x_unwind_info *tic6x_get_unwind (void)
 {
-    tic6x_unwind_info *unwind;
-    struct seg_info_data *seg_data;
+  tic6x_unwind_info *unwind;
+  struct segment_info_type *seg_info_data = seg_info (now_seg);
 
-    if (now_seg == NULL) {
-        return NULL;
-    }
+  if (!seg_info_data)
+    return NULL;
 
-    seg_data = &seg_info(now_seg)->tc_segment_info_data;
-    
-    unwind = seg_data->unwind;
-    if (unwind != NULL) {
-        return unwind;
-    }
-
-    unwind = seg_data->text_unwind;
-    if (unwind != NULL) {
-        return unwind;
-    }
-
-    unwind = XNEW(tic6x_unwind_info);
-    if (unwind == NULL) {
-        return NULL;
-    }
-
-    memset(unwind, 0, sizeof(*unwind));
-    seg_data->unwind = unwind;
-    
+  unwind = seg_info_data->tc_segment_info_data.unwind;
+  if (unwind)
     return unwind;
+
+  unwind = seg_info_data->tc_segment_info_data.text_unwind;
+  if (unwind)
+    return unwind;
+
+  unwind = XNEW (tic6x_unwind_info);
+  if (!unwind)
+    return NULL;
+
+  seg_info_data->tc_segment_info_data.unwind = unwind;
+  memset (unwind, 0, sizeof (*unwind));
+  return unwind;
 }
 
 /* Update the selected architecture based on ARCH, giving an error if
@@ -228,31 +221,24 @@ static tic6x_unwind_info *tic6x_get_unwind(void)
 static void
 tic6x_use_arch (const char *arch)
 {
+  unsigned int i;
+
   if (arch == NULL)
     {
-      as_bad (_("unknown architecture '%s'"), "");
+      as_bad (_("architecture name cannot be NULL"));
       return;
     }
 
-  for (unsigned int i = 0; i < ARRAY_SIZE (tic6x_arches); i++)
+  for (i = 0; i < ARRAY_SIZE (tic6x_arches); i++)
     {
-      if (strcmp (arch, tic6x_arches[i].arch) != 0)
-        continue;
-
-      tic6x_arch_enable = tic6x_arches[i].features;
-      
-      if (tic6x_seen_insns)
+      if (strcmp (arch, tic6x_arches[i].arch) == 0)
         {
-          tic6x_arch_attribute = 
-            elf32_tic6x_merge_arch_attributes (tic6x_arch_attribute,
-                                              tic6x_arches[i].attr);
+          tic6x_arch_enable = tic6x_arches[i].features;
+          tic6x_arch_attribute = tic6x_seen_insns 
+            ? elf32_tic6x_merge_arch_attributes (tic6x_arch_attribute, tic6x_arches[i].attr)
+            : tic6x_arches[i].attr;
+          return;
         }
-      else
-        {
-          tic6x_arch_attribute = tic6x_arches[i].attr;
-        }
-      
-      return;
     }
 
   as_bad (_("unknown architecture '%s'"), arch);
@@ -276,17 +262,15 @@ static const tic6x_pid_type_table tic6x_pid_types[] =
 static void
 tic6x_use_pid (const char *arg)
 {
-  unsigned int i;
-
   if (arg == NULL)
     {
-      as_bad (_("unknown -mpid= argument '%s'"), "");
+      as_bad (_("missing -mpid= argument"));
       return;
     }
 
-  for (i = 0; i < ARRAY_SIZE (tic6x_pid_types); i++)
+  for (unsigned int i = 0; i < ARRAY_SIZE (tic6x_pid_types); i++)
     {
-      if (tic6x_pid_types[i].arg != NULL && strcmp (arg, tic6x_pid_types[i].arg) == 0)
+      if (strcmp (arg, tic6x_pid_types[i].arg) == 0)
         {
           tic6x_pid = tic6x_pid_types[i].attr;
           return;
@@ -304,6 +288,8 @@ md_parse_option (int c, const char *arg)
   switch (c)
     {
     case OPTION_MARCH:
+      if (arg == NULL)
+        return 0;
       tic6x_use_arch (arg);
       break;
 
@@ -324,6 +310,8 @@ md_parse_option (int c, const char *arg)
       break;
 
     case OPTION_MPID:
+      if (arg == NULL)
+        return 0;
       tic6x_use_pid (arg);
       break;
 
@@ -336,7 +324,7 @@ md_parse_option (int c, const char *arg)
       break;
 
     case OPTION_MGENERATE_REL:
-      tic6x_generate_rela = 0;
+      tic6x_generate_rela = false;
       break;
 
     default:
@@ -349,53 +337,30 @@ void
 md_show_usage (FILE *stream ATTRIBUTE_UNUSED)
 {
   unsigned int i;
-  const char *option_descriptions[] = {
-    _("TMS320C6000 options:\n"),
-    _("  -march=ARCH             enable instructions from architecture ARCH\n"),
-    _("  -mbig-endian            generate big-endian code\n"),
-    _("  -mlittle-endian         generate little-endian code\n"),
-    _("  -mdsbt                  code uses DSBT addressing\n"),
-    _("  -mno-dsbt               code does not use DSBT addressing\n"),
-    _("  -mpid=no                code uses position-dependent data addressing\n"),
-    _("  -mpid=near              code uses position-independent data addressing,\n"
-      "                            GOT accesses use near DP addressing\n"),
-    _("  -mpid=far               code uses position-independent data addressing,\n"
-      "                            GOT accesses use far DP addressing\n"),
-    _("  -mpic                   code addressing is position-independent\n"),
-    _("  -mno-pic                code addressing is position-dependent\n")
-  };
-  
-  if (stream == NULL) {
+
+  if (stream == NULL)
     return;
-  }
-  
-  if (fputc('\n', stream) == EOF) {
-    return;
-  }
-  
-  for (i = 0; i < ARRAY_SIZE(option_descriptions); i++) {
-    if (fprintf(stream, "%s", option_descriptions[i]) < 0) {
-      return;
-    }
-  }
-  
-  if (fputc('\n', stream) == EOF) {
-    return;
-  }
-  
-  if (fprintf(stream, _("Supported ARCH values are:")) < 0) {
-    return;
-  }
-  
-  for (i = 0; i < ARRAY_SIZE(tic6x_arches); i++) {
-    if (fprintf(stream, " %s", tic6x_arches[i].arch) < 0) {
-      return;
-    }
-  }
-  
-  if (fputc('\n', stream) == EOF) {
-    return;
-  }
+
+  fputc ('\n', stream);
+  fprintf (stream, _("TMS320C6000 options:\n"));
+  fprintf (stream, _("  -march=ARCH             enable instructions from architecture ARCH\n"));
+  fprintf (stream, _("  -mbig-endian            generate big-endian code\n"));
+  fprintf (stream, _("  -mlittle-endian         generate little-endian code\n"));
+  fprintf (stream, _("  -mdsbt                  code uses DSBT addressing\n"));
+  fprintf (stream, _("  -mno-dsbt               code does not use DSBT addressing\n"));
+  fprintf (stream, _("  -mpid=no                code uses position-dependent data addressing\n"));
+  fprintf (stream, _("  -mpid=near              code uses position-independent data addressing,\n"
+                     "                            GOT accesses use near DP addressing\n"));
+  fprintf (stream, _("  -mpid=far               code uses position-independent data addressing,\n"
+                     "                            GOT accesses use far DP addressing\n"));
+  fprintf (stream, _("  -mpic                   code addressing is position-independent\n"));
+  fprintf (stream, _("  -mno-pic                code addressing is position-dependent\n"));
+
+  fputc ('\n', stream);
+  fprintf (stream, _("Supported ARCH values are:"));
+  for (i = 0; i < ARRAY_SIZE (tic6x_arches); i++)
+    fprintf (stream, " %s", tic6x_arches[i].arch);
+  fputc ('\n', stream);
 }
 
 /* Update enabled features based on the current architecture and
@@ -403,17 +368,16 @@ md_show_usage (FILE *stream ATTRIBUTE_UNUSED)
 static void
 tic6x_update_features (void)
 {
-  tic6x_features = tic6x_arch_enable;
+  const unsigned int arch_flags = tic6x_arch_enable;
+  const int has_c64x = (arch_flags & TIC6X_INSN_C64X) != 0;
+  const int has_extended_arch = (arch_flags & (TIC6X_INSN_C64X | TIC6X_INSN_C67XP)) != 0;
 
-  const unsigned int c64x_c67xp_mask = TIC6X_INSN_C64X | TIC6X_INSN_C67XP;
-  const int has_c64x = (tic6x_arch_enable & TIC6X_INSN_C64X) != 0;
-  const int has_c64x_or_c67xp = (tic6x_arch_enable & c64x_c67xp_mask) != 0;
-
-  tic6x_num_registers = has_c64x_or_c67xp ? 32 : 16;
+  tic6x_features = arch_flags;
+  tic6x_num_registers = has_extended_arch ? 32 : 16;
   tic6x_predicate_a0 = has_c64x;
-  tic6x_can_cross_fp_boundary = has_c64x_or_c67xp;
+  tic6x_can_cross_fp_boundary = has_extended_arch;
   tic6x_long_data_constraints = !has_c64x;
-  tic6x_compact_insns = (tic6x_arch_enable & TIC6X_INSN_C64XP) != 0;
+  tic6x_compact_insns = (arch_flags & TIC6X_INSN_C64XP) != 0;
 }
 
 /* Do configuration after all options have been parsed.  */
@@ -421,7 +385,10 @@ tic6x_update_features (void)
 void
 tic6x_after_parse_args (void)
 {
-  tic6x_update_features ();
+    if (tic6x_update_features == NULL) {
+        return;
+    }
+    tic6x_update_features();
 }
 
 /* Parse a .cantunwind directive.  */
@@ -430,8 +397,11 @@ s_tic6x_cantunwind (int ignored ATTRIBUTE_UNUSED)
 {
   tic6x_unwind_info *unwind = tic6x_get_unwind ();
 
-  if (unwind == NULL)
-    return;
+  if (!unwind)
+    {
+      as_bad (_("failed to get unwind info"));
+      return;
+    }
 
   if (unwind->data_bytes == 0)
     return;
@@ -444,11 +414,8 @@ s_tic6x_cantunwind (int ignored ATTRIBUTE_UNUSED)
 
   demand_empty_rest_of_line ();
 
-  if (unwind->personality_routine != NULL || unwind->personality_index != -1)
-    {
-      as_bad (_("personality routine specified for cantunwind frame"));
-      return;
-    }
+  if (unwind->personality_routine || unwind->personality_index != -1)
+    as_bad (_("personality routine specified for cantunwind frame"));
 
   unwind->personality_index = -2;
 }
@@ -461,6 +428,7 @@ s_tic6x_handlerdata (int ignored ATTRIBUTE_UNUSED)
 
   if (unwind == NULL)
     {
+      as_bad (_("failed to get unwind info"));
       return;
     }
 
@@ -491,21 +459,17 @@ s_tic6x_endp (int ignored ATTRIBUTE_UNUSED)
 {
   tic6x_unwind_info *unwind = tic6x_get_unwind ();
 
-  if (!unwind)
+  if (unwind == NULL)
     return;
 
-  if (unwind->data_bytes == 0)
+  if (unwind->data_bytes != 0)
     {
-      unwind->saved_seg = NULL;
-      unwind->table_entry = NULL;
-      return;
+      if (!unwind->table_entry)
+        tic6x_output_unwinding (false);
+
+      if (unwind->saved_seg != NULL)
+        subseg_set (unwind->saved_seg, unwind->saved_subseg);
     }
-
-  if (!unwind->table_entry)
-    tic6x_output_unwinding (false);
-
-  if (unwind->saved_seg)
-    subseg_set (unwind->saved_seg, unwind->saved_subseg);
 
   unwind->saved_seg = NULL;
   unwind->table_entry = NULL;
@@ -516,12 +480,13 @@ s_tic6x_endp (int ignored ATTRIBUTE_UNUSED)
 static void
 s_tic6x_personalityindex (int ignored ATTRIBUTE_UNUSED)
 {
-  tic6x_unwind_info *unwind = tic6x_get_unwind ();
+  tic6x_unwind_info *unwind;
   expressionS exp;
 
-  if (unwind == NULL)
+  unwind = tic6x_get_unwind ();
+  if (!unwind)
     {
-      as_bad (_("failed to get unwind info"));
+      as_bad (_("unable to get unwind info"));
       ignore_rest_of_line ();
       return;
     }
@@ -537,14 +502,14 @@ s_tic6x_personalityindex (int ignored ATTRIBUTE_UNUSED)
 
   if (exp.X_op != O_constant)
     {
-      as_bad (_("bad personality routine number"));
+      as_bad (_("personality routine number must be constant"));
       ignore_rest_of_line ();
       return;
     }
 
   if (exp.X_add_number < 0 || exp.X_add_number > 15)
     {
-      as_bad (_("bad personality routine number"));
+      as_bad (_("personality routine number must be between 0 and 15"));
       ignore_rest_of_line ();
       return;
     }
@@ -556,32 +521,33 @@ s_tic6x_personalityindex (int ignored ATTRIBUTE_UNUSED)
 static void
 s_tic6x_personality (int ignored ATTRIBUTE_UNUSED)
 {
-  char *name;
-  char c;
-  tic6x_unwind_info *unwind;
+  char *name, c;
+  tic6x_unwind_info *unwind = tic6x_get_unwind ();
 
-  unwind = tic6x_get_unwind ();
-  if (unwind == NULL)
-    {
-      as_bad (_("failed to get unwind info"));
-      return;
-    }
+  if (!unwind) {
+    as_bad (_("failed to get unwind info"));
+    return;
+  }
 
-  if (unwind->personality_routine != NULL || unwind->personality_index != -1)
-    {
-      as_bad (_("duplicate .personality directive"));
-      return;
-    }
+  if (unwind->personality_routine || unwind->personality_index != -1) {
+    as_bad (_("duplicate .personality directive"));
+    return;
+  }
 
   c = get_symbol_name (&name);
-  if (name == NULL)
-    {
-      restore_line_pointer (c);
-      as_bad (_("invalid personality name"));
-      return;
-    }
+  if (!name) {
+    restore_line_pointer (c);
+    as_bad (_("expected symbol name"));
+    return;
+  }
 
   unwind->personality_routine = symbol_find_or_make (name);
+  if (!unwind->personality_routine) {
+    restore_line_pointer (c);
+    as_bad (_("failed to create symbol"));
+    return;
+  }
+
   restore_line_pointer (c);
   demand_empty_rest_of_line ();
 }
@@ -590,25 +556,28 @@ s_tic6x_personality (int ignored ATTRIBUTE_UNUSED)
 static void
 s_tic6x_arch (int ignored ATTRIBUTE_UNUSED)
 {
-  char *arch_start;
-  char *arch_end;
-  char saved_char;
+  char c;
+  char *arch;
+
+  arch = input_line_pointer;
+  if (arch == NULL) {
+    return;
+  }
+
+  while (*input_line_pointer != '\0' &&
+         !is_end_of_stmt (*input_line_pointer) &&
+         !is_whitespace (*input_line_pointer)) {
+    input_line_pointer++;
+  }
   
-  arch_start = input_line_pointer;
-  arch_end = arch_start;
+  c = *input_line_pointer;
+  *input_line_pointer = '\0';
+
+  tic6x_use_arch (arch);
+  tic6x_update_features ();
   
-  while (*arch_end != '\0' && !is_end_of_stmt(*arch_end) && !is_whitespace(*arch_end))
-    arch_end++;
-  
-  saved_char = *arch_end;
-  *arch_end = '\0';
-  
-  tic6x_use_arch(arch_start);
-  tic6x_update_features();
-  
-  *arch_end = saved_char;
-  input_line_pointer = arch_end;
-  demand_empty_rest_of_line();
+  *input_line_pointer = c;
+  demand_empty_rest_of_line ();
 }
 
 /* Parse a .ehtype directive.  */
@@ -645,13 +614,13 @@ s_tic6x_ehtype (int ignored ATTRIBUTE_UNUSED)
   p = frag_more (4);
   if (p == NULL)
     {
-      as_fatal (_("cannot allocate fragment space"));
+      as_bad (_("memory allocation failed"));
       return;
     }
-
+  
   memset (p, 0, 4);
   fix_new_exp (frag_now, p - frag_now->fr_literal, 4,
-	       &exp, 0, BFD_RELOC_C6000_EHTYPE);
+               &exp, 0, BFD_RELOC_C6000_EHTYPE);
 
   demand_empty_rest_of_line ();
 }
@@ -661,19 +630,11 @@ s_tic6x_ehtype (int ignored ATTRIBUTE_UNUSED)
 static void
 s_tic6x_nocmp (int ignored ATTRIBUTE_UNUSED)
 {
-  if (now_seg == NULL)
+  seginfo_type *seg = seg_info (now_seg);
+  if (seg != NULL)
     {
-      return;
+      seg->tc_segment_info_data.nocmp = true;
     }
-  
-  segT current_segment = now_seg;
-  segment_info_type *seg_info_ptr = seg_info (current_segment);
-  
-  if (seg_info_ptr != NULL)
-    {
-      seg_info_ptr->tc_segment_info_data.nocmp = true;
-    }
-  
   demand_empty_rest_of_line ();
 }
 
@@ -696,109 +657,110 @@ s_tic6x_scomm (int ignore ATTRIBUTE_UNUSED)
   int align2;
 
   c = get_symbol_name (&name);
+  if (!name) {
+    ignore_rest_of_line ();
+    return;
+  }
+
   p = input_line_pointer;
   (void) restore_line_pointer (c);
   SKIP_WHITESPACE ();
   
-  if (*input_line_pointer != ',')
-    {
-      as_bad (_("expected comma after symbol name"));
-      ignore_rest_of_line ();
-      return;
-    }
+  if (*input_line_pointer != ',') {
+    as_bad (_("expected comma after symbol name"));
+    ignore_rest_of_line ();
+    return;
+  }
 
   input_line_pointer++;
   size = get_absolute_expression ();
-  if (size < 0)
-    {
-      as_warn (_("invalid length for .scomm directive"));
+  if (size < 0) {
+    as_warn (_("invalid length for .scomm directive"));
+    ignore_rest_of_line ();
+    return;
+  }
+
+  if (*input_line_pointer != ',') {
+    align = 8;
+  } else {
+    ++input_line_pointer;
+    align = get_absolute_expression ();
+    if (align <= 0) {
+      as_warn (_("alignment is not a positive number"));
+      align = 8;
+    }
+  }
+
+  align2 = 0;
+  if (align) {
+    offsetT temp_align = align;
+    while ((temp_align & 1) == 0) {
+      temp_align >>= 1;
+      align2++;
+    }
+    if (temp_align != 1) {
+      as_bad (_("alignment is not a power of 2"));
       ignore_rest_of_line ();
       return;
     }
-
-  if (*input_line_pointer != ',')
-    {
-      align = 8;
-    }
-  else
-    {
-      ++input_line_pointer;
-      align = get_absolute_expression ();
-      if (align <= 0)
-        {
-          as_warn (_("alignment is not a positive number"));
-          align = 8;
-        }
-    }
-
-  align2 = 0;
-  if (align)
-    {
-      offsetT temp_align = align;
-      while ((temp_align & 1) == 0)
-        {
-          temp_align >>= 1;
-          ++align2;
-        }
-      if (temp_align != 1)
-        {
-          as_bad (_("alignment is not a power of 2"));
-          ignore_rest_of_line ();
-          return;
-        }
-    }
+  }
 
   *p = 0;
   symbolP = symbol_find_or_make (name);
   *p = c;
 
-  if (S_IS_DEFINED (symbolP))
-    {
-      as_bad (_("attempt to re-define symbol `%s'"), S_GET_NAME (symbolP));
-      ignore_rest_of_line ();
-      return;
+  if (!symbolP) {
+    ignore_rest_of_line ();
+    return;
+  }
+
+  if (S_IS_DEFINED (symbolP)) {
+    as_bad (_("attempt to re-define symbol `%s'"), S_GET_NAME (symbolP));
+    ignore_rest_of_line ();
+    return;
+  }
+
+  if (S_GET_VALUE (symbolP) && S_GET_VALUE (symbolP) != (valueT) size) {
+    as_bad (_("attempt to redefine `%s' with a different length"), S_GET_NAME (symbolP));
+    ignore_rest_of_line ();
+    return;
+  }
+
+  if (symbol_get_obj (symbolP)->local) {
+    segT old_sec = now_seg;
+    int old_subsec = now_subseg;
+    char *pfrag;
+
+    record_alignment (sbss_section, align2);
+    subseg_set (sbss_section, 0);
+
+    if (align2) {
+      frag_align (align2, 0, 0);
     }
 
-  valueT current_value = S_GET_VALUE (symbolP);
-  if (current_value && current_value != (valueT) size)
-    {
-      as_bad (_("attempt to redefine `%s' with a different length"), S_GET_NAME (symbolP));
-      ignore_rest_of_line ();
-      return;
+    if (S_GET_SEGMENT (symbolP) == sbss_section) {
+      symbol_get_frag (symbolP)->fr_symbol = 0;
     }
 
-  if (symbol_get_obj (symbolP)->local)
-    {
-      segT old_sec = now_seg;
-      int old_subsec = now_subseg;
-      char *pfrag;
+    symbol_set_frag (symbolP, frag_now);
 
-      record_alignment (sbss_section, align2);
-      subseg_set (sbss_section, 0);
-
-      if (align2)
-        frag_align (align2, 0, 0);
-
-      if (S_GET_SEGMENT (symbolP) == sbss_section)
-        symbol_get_frag (symbolP)->fr_symbol = 0;
-
-      symbol_set_frag (symbolP, frag_now);
-      pfrag = frag_var (rs_org, 1, 1, 0, symbolP, size, NULL);
+    pfrag = frag_var (rs_org, 1, 1, 0, symbolP, size, NULL);
+    if (pfrag) {
       *pfrag = 0;
-      S_SET_SIZE (symbolP, size);
-      S_SET_SEGMENT (symbolP, sbss_section);
-      S_CLEAR_EXTERNAL (symbolP);
-      subseg_set (old_sec, old_subsec);
     }
-  else
-    {
-      S_SET_VALUE (symbolP, size);
-      S_SET_ALIGN (symbolP, 1 << align2);
-      S_SET_EXTERNAL (symbolP);
-      S_SET_SEGMENT (symbolP, &scom_section);
-    }
+    S_SET_SIZE (symbolP, size);
+    S_SET_SEGMENT (symbolP, sbss_section);
+    S_CLEAR_EXTERNAL (symbolP);
+    subseg_set (old_sec, old_subsec);
+  } else {
+    S_SET_VALUE (symbolP, size);
+    S_SET_ALIGN (symbolP, 1 << align2);
+    S_SET_EXTERNAL (symbolP);
+    S_SET_SEGMENT (symbolP, &scom_section);
+  }
 
   symbol_get_bfdsym (symbolP)->flags |= BSF_OBJECT;
+
   demand_empty_rest_of_line ();
 }
 
@@ -837,13 +799,10 @@ tic6x_convert_symbolic_attribute (const char *name)
 {
   if (name == NULL)
     return -1;
-
+    
   for (unsigned int i = 0; i < ARRAY_SIZE (tic6x_attributes); i++)
-    {
-      if (tic6x_attributes[i].name != NULL && 
-          strcmp (name, tic6x_attributes[i].name) == 0)
-        return tic6x_attributes[i].tag;
-    }
+    if (strcmp (name, tic6x_attributes[i].name) == 0)
+      return tic6x_attributes[i].tag;
 
   return -1;
 }
@@ -882,43 +841,44 @@ md_begin (void)
   bfd_set_arch_mach (stdoutput, TARGET_ARCH, 0);
 
   opcode_hash = str_htab_create ();
-  if (!opcode_hash)
-    return;
+  if (opcode_hash == NULL)
+    as_fatal ("could not create opcode hash table");
 
   for (id = 0; id < tic6x_opcode_max; id++)
     {
       tic6x_opcode_list *opc = XNEW (tic6x_opcode_list);
-      if (!opc)
-        continue;
+      if (opc == NULL)
+        as_fatal ("out of memory allocating opcode list");
 
       opc->id = id;
       opc->next = str_hash_find (opcode_hash, tic6x_opcode_table[id].name);
-      str_hash_insert (opcode_hash, tic6x_opcode_table[id].name, opc, 1);
+      
+      if (str_hash_insert (opcode_hash, tic6x_opcode_table[id].name, opc, 1) != NULL)
+        as_fatal ("could not insert opcode into hash table");
     }
 
   seg = now_seg;
   subseg = now_subseg;
 
   sbss_section = subseg_new (".bss", 0);
-  if (sbss_section)
-    {
-      seg_info (sbss_section)->bss = 1;
-      applicable = bfd_applicable_section_flags (stdoutput);
-      bfd_set_section_flags (sbss_section, applicable & SEC_ALLOC);
-    }
+  if (sbss_section == NULL)
+    as_fatal ("could not create .bss section");
+  
+  seg_info (sbss_section)->bss = 1;
+
+  applicable = bfd_applicable_section_flags (stdoutput);
+  if (!bfd_set_section_flags (sbss_section, applicable & SEC_ALLOC))
+    as_fatal ("could not set section flags");
 
   subseg_set (seg, subseg);
 
-  if (bfd_com_section_ptr && bfd_com_section_ptr->symbol)
-    {
-      scom_section = *bfd_com_section_ptr;
-      scom_section.name = ".scommon";
-      scom_section.output_section = &scom_section;
-      scom_section.symbol = &scom_symbol;
-      scom_symbol = *bfd_com_section_ptr->symbol;
-      scom_symbol.name = ".scommon";
-      scom_symbol.section = &scom_section;
-    }
+  scom_section = *bfd_com_section_ptr;
+  scom_section.name = ".scommon";
+  scom_section.output_section = &scom_section;
+  scom_section.symbol = &scom_symbol;
+  scom_symbol = *bfd_com_section_ptr->symbol;
+  scom_symbol.name = ".scommon";
+  scom_symbol.section = &scom_section;
 }
 
 /* Whether the current line being parsed had the "||" parallel bars.  */
@@ -944,160 +904,104 @@ static unsigned int tic6x_line_z;
 int
 tic6x_unrecognized_line (int c)
 {
-  if (c == '|')
-    return handle_pipe_character();
-  
-  if (c == '[')
-    return handle_predicate();
-    
-  return 0;
-}
-
-static int
-handle_pipe_character (void)
-{
-  if (input_line_pointer[0] != '|')
-    return 0;
-    
-  if (input_line_pointer[1] == '^')
-  {
-    tic6x_line_spmask = true;
-    input_line_pointer += 2;
-  }
-  else
-  {
-    input_line_pointer += 1;
-  }
-  
-  if (tic6x_line_parallel)
-    as_bad (_("multiple '||' on same line"));
-    
-  tic6x_line_parallel = true;
-  
-  if (tic6x_line_creg)
-    as_bad (_("'||' after predicate"));
-    
-  return 1;
-}
-
-static int
-handle_predicate (void)
-{
-  char *p = input_line_pointer;
-  char *endp = find_predicate_end(p);
-  
-  if (endp == NULL)
-    return 0;
-    
-  predicate_info pred = parse_predicate(p, endp);
-  
-  if (pred.is_bad)
-  {
-    report_bad_predicate(p - 1, endp);
-    input_line_pointer = endp;
-    return 1;
-  }
-  
-  if (tic6x_line_creg)
-    as_bad (_("multiple predicates on same line"));
-    
-  set_predicate_register(pred);
-  input_line_pointer = endp;
-  
-  return 1;
-}
-
-static char *
-find_predicate_end (char *p)
-{
-  while (*p != ']' && !is_end_of_stmt (*p))
-    p++;
-    
-  return (*p == ']') ? (p + 1) : NULL;
-}
-
-static predicate_info
-parse_predicate (char *p, char *endp)
-{
-  predicate_info pred = {0, false, false};
-  
-  if (*p == '!')
-  {
-    pred.z = 1;
-    p++;
-  }
-  
-  if (!parse_register_type(p, &pred.areg))
-  {
-    pred.is_bad = true;
-    return pred;
-  }
-  
-  p++;
-  
-  if (*p < '0' || *p > '2' || p[1] != ']')
-  {
-    pred.is_bad = true;
-    return pred;
-  }
-  
-  pred.reg_num = *p;
-  
-  return pred;
-}
-
-static bool
-parse_register_type (char *p, bool *areg)
-{
-  switch (*p)
-  {
-    case 'A':
-    case 'a':
-      *areg = true;
-      return true;
-    case 'B':
-    case 'b':
-      *areg = false;
-      return true;
-    default:
-      return false;
-  }
-}
-
-static void
-report_bad_predicate (char *start, char *endp)
-{
-  char saved = *endp;
-  *endp = '\0';
-  as_bad (_("bad predicate '%s'"), start);
-  *endp = saved;
-}
-
-static void
-set_predicate_register (predicate_info pred)
-{
-  static const int areg_map[] = {6, 4, 5};
-  static const int breg_map[] = {1, 2, 3};
-  
-  int reg_index = pred.reg_num - '0';
-  
-  if (reg_index < 0 || reg_index > 2)
-    abort();
-    
-  tic6x_line_creg = pred.areg ? areg_map[reg_index] : breg_map[reg_index];
-  
-  if (pred.areg && reg_index == 0 && !tic6x_predicate_a0)
-    as_bad (_("predication on A0 not supported on this architecture"));
-    
-  tic6x_line_z = pred.z;
-}
-
-typedef struct {
+  char *p, *endp;
   unsigned int z;
   bool areg;
-  bool is_bad;
-  char reg_num;
-} predicate_info;
+  bool bad_predicate;
+
+  switch (c)
+    {
+    case '|':
+      if (input_line_pointer[0] != '|')
+        return 0;
+      
+      if (input_line_pointer[1] == '^')
+        {
+          tic6x_line_spmask = true;
+          input_line_pointer += 2;
+        }
+      else
+        input_line_pointer += 1;
+      
+      if (tic6x_line_parallel)
+        as_bad (_("multiple '||' on same line"));
+      tic6x_line_parallel = true;
+      if (tic6x_line_creg)
+        as_bad (_("'||' after predicate"));
+      return 1;
+
+    case '[':
+      p = input_line_pointer;
+      while (*p != ']' && !is_end_of_stmt (*p))
+        p++;
+      if (*p != ']')
+        return 0;
+      endp = p + 1;
+      
+      p = input_line_pointer;
+      z = 0;
+      bad_predicate = false;
+      areg = true;
+      
+      if (*p == '!')
+        {
+          z = 1;
+          p++;
+        }
+      
+      if (*p == 'A' || *p == 'a')
+        areg = true;
+      else if (*p == 'B' || *p == 'b')
+        areg = false;
+      else
+        bad_predicate = true;
+      
+      if (!bad_predicate)
+        {
+          p++;
+          if ((*p < '0' || *p > '2') || p[1] != ']')
+            bad_predicate = true;
+          else
+            input_line_pointer = p + 2;
+        }
+
+      if (tic6x_line_creg)
+        as_bad (_("multiple predicates on same line"));
+
+      if (bad_predicate)
+        {
+          char ctmp = *endp;
+          *endp = 0;
+          as_bad (_("bad predicate '%s'"), input_line_pointer - 1);
+          *endp = ctmp;
+          input_line_pointer = endp;
+          return 1;
+        }
+
+      switch (*p)
+        {
+        case '0':
+          tic6x_line_creg = (areg ? 6 : 1);
+          if (areg && !tic6x_predicate_a0)
+            as_bad (_("predication on A0 not supported on this architecture"));
+          break;
+
+        case '1':
+          tic6x_line_creg = (areg ? 4 : 2);
+          break;
+
+        case '2':
+          tic6x_line_creg = (areg ? 5 : 3);
+          break;
+        }
+
+      tic6x_line_z = z;
+      return 1;
+
+    default:
+      return 0;
+    }
+}
 
 /* Do any target-specific handling of a label required.  */
 
@@ -1106,6 +1010,10 @@ tic6x_frob_label (symbolS *sym)
 {
   segment_info_type *si;
   tic6x_label_list *new_label;
+  tic6x_label_list *current_list;
+
+  if (!sym)
+    return;
 
   if (tic6x_line_parallel)
     {
@@ -1113,6 +1021,7 @@ tic6x_frob_label (symbolS *sym)
       tic6x_line_parallel = false;
       tic6x_line_spmask = false;
     }
+  
   if (tic6x_line_creg)
     {
       as_bad (_("label after predicate"));
@@ -1121,8 +1030,15 @@ tic6x_frob_label (symbolS *sym)
     }
 
   si = seg_info (now_seg);
+  if (!si)
+    return;
+
   new_label = XNEW (tic6x_label_list);
-  new_label->next = si->tc_segment_info_data.label_list;
+  if (!new_label)
+    return;
+
+  current_list = si->tc_segment_info_data.label_list;
+  new_label->next = current_list;
   new_label->label = sym;
   si->tc_segment_info_data.label_list = new_label;
 
@@ -1151,7 +1067,8 @@ tic6x_end_of_line (void)
 
 /* Do any target-specific handling of the start of a logical line.  */
 
-void tic6x_start_line_hook(void)
+void
+tic6x_start_line_hook(void)
 {
     tic6x_end_of_line();
 }
@@ -1160,7 +1077,8 @@ void tic6x_start_line_hook(void)
    the command line, and any other inputs it includes, have been
    read.  */
 
-void tic6x_cleanup(void)
+void
+tic6x_cleanup(void)
 {
     tic6x_end_of_line();
 }
@@ -1168,9 +1086,12 @@ void tic6x_cleanup(void)
 /* Do target-specific initialization after arguments have been
    processed and the output file created.  */
 
-void tic6x_init_after_args(void)
+void
+tic6x_init_after_args(void)
 {
-    elf32_tic6x_set_use_rela_p(stdoutput, tic6x_generate_rela);
+    if (stdoutput != NULL) {
+        elf32_tic6x_set_use_rela_p(stdoutput, tic6x_generate_rela);
+    }
 }
 
 /* Free LIST of labels (possibly NULL).  */
@@ -1178,35 +1099,32 @@ void tic6x_init_after_args(void)
 static void
 tic6x_free_label_list (tic6x_label_list *list)
 {
-  tic6x_label_list *next;
+  tic6x_label_list *current = list;
   
-  while (list != NULL)
+  while (current != NULL)
     {
-      next = list->next;
-      free (list);
-      list = next;
+      tic6x_label_list *next = current->next;
+      free (current);
+      current = next;
     }
 }
 
 /* Handle a data alignment of N bytes.  */
 
-void tic6x_cons_align(int n ATTRIBUTE_UNUSED)
+void
+tic6x_cons_align (int n ATTRIBUTE_UNUSED)
 {
-    segment_info_type *seginfo = seg_info(now_seg);
-    
-    if (seginfo == NULL) {
-        return;
-    }
-    
-    if (seginfo->tc_segment_info_data.label_list != NULL) {
-        tic6x_free_label_list(seginfo->tc_segment_info_data.label_list);
-        seginfo->tc_segment_info_data.label_list = NULL;
-    }
-    
-    seginfo->tc_segment_info_data.execute_packet_frag = NULL;
-    seginfo->tc_segment_info_data.last_insn_lsb = NULL;
-    seginfo->tc_segment_info_data.spmask_addr = NULL;
-    seginfo->tc_segment_info_data.func_units_used = 0;
+  segment_info_type *seginfo = seg_info (now_seg);
+
+  if (seginfo == NULL)
+    return;
+
+  tic6x_free_label_list (seginfo->tc_segment_info_data.label_list);
+  seginfo->tc_segment_info_data.label_list = NULL;
+  seginfo->tc_segment_info_data.execute_packet_frag = NULL;
+  seginfo->tc_segment_info_data.last_insn_lsb = NULL;
+  seginfo->tc_segment_info_data.spmask_addr = NULL;
+  seginfo->tc_segment_info_data.func_units_used = 0;
 }
 
 /* Handle an alignment directive.  Return TRUE if the
@@ -1215,25 +1133,27 @@ void tic6x_cons_align(int n ATTRIBUTE_UNUSED)
 bool
 tic6x_do_align (int n, char *fill, int len ATTRIBUTE_UNUSED, int max)
 {
-  if (n <= 0 || n > 5)
+  if (n <= 0 || max < 0 || max >= (1 << n) || need_pass_2 || 
+      fill != NULL || !subseg_text_p (now_seg))
     return false;
-    
-  if (max < 0 || max >= (1 << n))
+
+  if (n > 5)
     return false;
-    
-  if (need_pass_2 || fill != NULL || !subseg_text_p (now_seg))
-    return false;
+
+  fragS *align_frag;
+  char *p;
 
   if (frag_now_fix () != 0)
     {
       if (frag_now->fr_type != rs_machine_dependent)
         frag_wane (frag_now);
+
       frag_new (0);
     }
-    
+  
   frag_grow (32);
-  fragS *align_frag = frag_now;
-  char *p = frag_var (rs_machine_dependent, 32, 32, max, NULL, n, NULL);
+  align_frag = frag_now;
+  p = frag_var (rs_machine_dependent, 32, 32, max, NULL, n, NULL);
   
   if (p != align_frag->fr_literal)
     abort ();
@@ -1356,48 +1276,52 @@ typedef struct
 static bool
 tic6x_parse_register (char **p, tic6x_register *reg)
 {
-  char *r = *p;
-  
-  if (r == NULL || reg == NULL)
+  char *r;
+  int first_digit, second_digit;
+
+  if (!p || !*p || !reg)
     return false;
 
-  char side_char = *r;
-  if ((side_char | 0x20) == 'a')
+  r = *p;
+
+  switch (*r)
     {
+    case 'a':
+    case 'A':
       reg->side = 1;
-    }
-  else if ((side_char | 0x20) == 'b')
-    {
+      break;
+    case 'b':
+    case 'B':
       reg->side = 2;
-    }
-  else
-    {
+      break;
+    default:
       return false;
     }
-  
   r++;
-  
+
   if (*r < '0' || *r > '9')
     return false;
   
-  reg->num = *r - '0';
+  first_digit = *r - '0';
   r++;
-  
+
   if (*r >= '0' && *r <= '9')
     {
-      if (reg->num == 0)
-        return false;
-      
-      reg->num = reg->num * 10 + (*r - '0');
+      second_digit = *r - '0';
+      reg->num = first_digit * 10 + second_digit;
       r++;
       
       if (*r >= '0' && *r <= '9')
         return false;
     }
-  
+  else
+    {
+      reg->num = first_digit;
+    }
+
   if (reg->num >= 32)
     return false;
-  
+
   *p = r;
   return true;
 }
@@ -1410,29 +1334,27 @@ static bool
 tic6x_parse_func_unit_base (char *p, tic6x_func_unit_base *base,
 			    unsigned int *side)
 {
-  if (p == NULL || base == NULL || side == NULL)
+  tic6x_func_unit_base maybe_base = tic6x_func_unit_nfu;
+  unsigned int maybe_side = 0;
+
+  if (!p || !base || !side)
     return false;
 
-  tic6x_func_unit_base parsed_base;
-  unsigned int parsed_side;
-
-  switch (p[0])
+  char first_char = (p[0] >= 'a' && p[0] <= 'z') ? p[0] - 'a' + 'A' : p[0];
+  
+  switch (first_char)
     {
-    case 'd':
     case 'D':
-      parsed_base = tic6x_func_unit_d;
+      maybe_base = tic6x_func_unit_d;
       break;
-    case 'l':
     case 'L':
-      parsed_base = tic6x_func_unit_l;
+      maybe_base = tic6x_func_unit_l;
       break;
-    case 'm':
     case 'M':
-      parsed_base = tic6x_func_unit_m;
+      maybe_base = tic6x_func_unit_m;
       break;
-    case 's':
     case 'S':
-      parsed_base = tic6x_func_unit_s;
+      maybe_base = tic6x_func_unit_s;
       break;
     default:
       return false;
@@ -1441,17 +1363,17 @@ tic6x_parse_func_unit_base (char *p, tic6x_func_unit_base *base,
   switch (p[1])
     {
     case '1':
-      parsed_side = 1;
+      maybe_side = 1;
       break;
     case '2':
-      parsed_side = 2;
+      maybe_side = 2;
       break;
     default:
       return false;
     }
 
-  *base = parsed_base;
-  *side = parsed_side;
+  *base = maybe_base;
+  *side = maybe_side;
   return true;
 }
 
@@ -1466,410 +1388,387 @@ static bool
 tic6x_parse_operand (char **p, tic6x_operand *op, unsigned int op_forms,
 		     char *str, int opc_len, unsigned int opno)
 {
+  bool operand_parsed = false;
   char *q = *p;
 
   if ((op_forms & (TIC6X_OP_MEM_NOUNREG | TIC6X_OP_MEM_UNREG))
       == (TIC6X_OP_MEM_NOUNREG | TIC6X_OP_MEM_UNREG))
     abort ();
 
-  if ((op_forms & TIC6X_OP_FUNC_UNIT) && tic6x_try_parse_func_unit(q, op))
+  if (!operand_parsed && (op_forms & TIC6X_OP_FUNC_UNIT))
     {
-      *p = q;
-      return true;
+      tic6x_func_unit_base base = tic6x_func_unit_nfu;
+      unsigned int side = 0;
+
+      if (tic6x_parse_func_unit_base (q, &base, &side))
+	{
+	  char *rq = q + 2;
+
+	  skip_whitespace (rq);
+	  if (is_end_of_stmt (*rq) || *rq == ',')
+	    {
+	      op->form = TIC6X_OP_FUNC_UNIT;
+	      op->value.func_unit.base = base;
+	      op->value.func_unit.side = side;
+	      operand_parsed = true;
+	      q = rq;
+	    }
+	}
     }
 
-  if ((op_forms & TIC6X_OP_IRP) && tic6x_try_parse_literal(q, op, "irp", TIC6X_OP_IRP))
+  if (!operand_parsed && (op_forms & TIC6X_OP_IRP))
     {
-      *p = q;
-      return true;
+      if ((q[0] == 'i' || q[0] == 'I')
+	  && (q[1] == 'r' || q[1] == 'R')
+	  && (q[2] == 'p' || q[2] == 'P'))
+	{
+	  char *rq = q + 3;
+
+	  skip_whitespace (rq);
+	  if (is_end_of_stmt (*rq) || *rq == ',')
+	    {
+	      op->form = TIC6X_OP_IRP;
+	      operand_parsed = true;
+	      q = rq;
+	    }
+	}
     }
 
-  if ((op_forms & TIC6X_OP_NRP) && tic6x_try_parse_literal(q, op, "nrp", TIC6X_OP_NRP))
+  if (!operand_parsed && (op_forms & TIC6X_OP_NRP))
     {
-      *p = q;
-      return true;
+      if ((q[0] == 'n' || q[0] == 'N')
+	  && (q[1] == 'r' || q[1] == 'R')
+	  && (q[2] == 'p' || q[2] == 'P'))
+	{
+	  char *rq = q + 3;
+
+	  skip_whitespace (rq);
+	  if (is_end_of_stmt (*rq) || *rq == ',')
+	    {
+	      op->form = TIC6X_OP_NRP;
+	      operand_parsed = true;
+	      q = rq;
+	    }
+	}
     }
 
-  if ((op_forms & TIC6X_OP_CTRL) && tic6x_try_parse_ctrl_register(q, op))
+  if (!operand_parsed && (op_forms & TIC6X_OP_CTRL))
     {
-      *p = q;
-      return true;
+      tic6x_ctrl_id crid;
+
+      for (crid = 0; crid < tic6x_ctrl_max; crid++)
+	{
+	  size_t len = strlen (tic6x_ctrl_table[crid].name);
+
+	  if (strncasecmp (tic6x_ctrl_table[crid].name, q, len) == 0)
+	    {
+	      char *rq = q + len;
+
+	      skip_whitespace (rq);
+	      if (is_end_of_stmt (*rq) || *rq == ',')
+		{
+		  op->form = TIC6X_OP_CTRL;
+		  op->value.ctrl = crid;
+		  operand_parsed = true;
+		  q = rq;
+		  if (!(tic6x_ctrl_table[crid].isa_variants & tic6x_features))
+		    as_bad (_("control register '%s' not supported "
+			      "on this architecture"),
+			    tic6x_ctrl_table[crid].name);
+		  break;
+		}
+	    }
+	}
     }
 
-  if ((op_forms & (TIC6X_OP_MEM_NOUNREG | TIC6X_OP_MEM_UNREG)) && tic6x_try_parse_memory(q, op, op_forms))
+  if (!operand_parsed
+      && (op_forms & (TIC6X_OP_MEM_NOUNREG | TIC6X_OP_MEM_UNREG)))
     {
-      *p = q;
-      return true;
-    }
+      bool mem_ok = true;
+      char *mq = q;
+      tic6x_mem_mod mem_mod = tic6x_mem_mod_none;
+      tic6x_register base_reg;
+      bool require_offset, permit_offset;
+      tic6x_mem_scaling scaled;
+      bool offset_is_reg = false;
+      expressionS offset_exp;
+      tic6x_register offset_reg;
 
-  if ((op_forms & (TIC6X_OP_REG | TIC6X_OP_REGPAIR)) && tic6x_try_parse_register_operand(q, op, op_forms, opno, str, opc_len))
-    {
-      *p = q;
-      return true;
-    }
-
-  if ((op_forms & TIC6X_OP_EXP) && tic6x_try_parse_expression(q, op))
-    {
-      *p = q;
-      return true;
-    }
-
-  tic6x_report_parse_error(op_forms, opno, opc_len, str);
-  while (!is_end_of_stmt (*q) && *q != ',')
-    q++;
-  *p = q;
-  return false;
-}
-
-static bool
-tic6x_try_parse_func_unit(char *q, tic6x_operand *op)
-{
-  tic6x_func_unit_base base = tic6x_func_unit_nfu;
-  unsigned int side = 0;
-
-  if (!tic6x_parse_func_unit_base(q, &base, &side))
-    return false;
-
-  char *rq = q + 2;
-  skip_whitespace(rq);
-  
-  if (!is_end_of_stmt(*rq) && *rq != ',')
-    return false;
-
-  op->form = TIC6X_OP_FUNC_UNIT;
-  op->value.func_unit.base = base;
-  op->value.func_unit.side = side;
-  return true;
-}
-
-static bool
-tic6x_try_parse_literal(char *q, tic6x_operand *op, const char *literal, tic6x_op_form form)
-{
-  size_t len = strlen(literal);
-  
-  if (strncasecmp(q, literal, len) != 0)
-    return false;
-
-  char *rq = q + len;
-  skip_whitespace(rq);
-  
-  if (!is_end_of_stmt(*rq) && *rq != ',')
-    return false;
-
-  op->form = form;
-  return true;
-}
-
-static bool
-tic6x_try_parse_ctrl_register(char *q, tic6x_operand *op)
-{
-  for (tic6x_ctrl_id crid = 0; crid < tic6x_ctrl_max; crid++)
-    {
-      size_t len = strlen(tic6x_ctrl_table[crid].name);
-      
-      if (strncasecmp(tic6x_ctrl_table[crid].name, q, len) != 0)
-        continue;
-
-      char *rq = q + len;
-      skip_whitespace(rq);
-      
-      if (!is_end_of_stmt(*rq) && *rq != ',')
-        continue;
-
-      op->form = TIC6X_OP_CTRL;
-      op->value.ctrl = crid;
-      
-      if (!(tic6x_ctrl_table[crid].isa_variants & tic6x_features))
-        as_bad(_("control register '%s' not supported on this architecture"),
-               tic6x_ctrl_table[crid].name);
-      
-      return true;
-    }
-  
-  return false;
-}
-
-static bool
-tic6x_try_parse_memory(char *q, tic6x_operand *op, unsigned int op_forms)
-{
-  char *mq = q;
-  tic6x_mem_mod mem_mod = tic6x_mem_mod_none;
-  tic6x_register base_reg;
-  tic6x_mem_scaling scaled = tic6x_offset_none;
-  bool offset_is_reg = false;
-  expressionS offset_exp;
-  tic6x_register offset_reg;
-
-  if (*mq != '*')
-    return false;
-  
-  mq++;
-  skip_whitespace(mq);
-
-  if (!tic6x_parse_memory_modifier(&mq, &mem_mod))
-    return false;
-
-  if (!tic6x_parse_register(&mq, &base_reg))
-    return false;
-
-  if (mem_mod == tic6x_mem_mod_none)
-    tic6x_parse_post_modifier(&mq, &mem_mod);
-
-  bool permit_offset = (mem_mod != tic6x_mem_mod_none);
-  bool require_offset = (mem_mod == tic6x_mem_mod_plus || mem_mod == tic6x_mem_mod_minus);
-
-  if (permit_offset && !tic6x_parse_memory_offset(&mq, &scaled, &offset_is_reg, &offset_reg, &offset_exp, op_forms))
-    return false;
-
-  if (require_offset && scaled == tic6x_offset_none)
-    return false;
-
-  skip_whitespace(mq);
-  if (!is_end_of_stmt(*mq) && *mq != ',')
-    return false;
-
-  op->form = op_forms & (TIC6X_OP_MEM_NOUNREG | TIC6X_OP_MEM_UNREG);
-  op->value.mem.base_reg = base_reg;
-  op->value.mem.mod = mem_mod;
-  op->value.mem.scaled = scaled;
-  op->value.mem.offset_is_reg = offset_is_reg;
-  
-  if (offset_is_reg)
-    op->value.mem.offset.reg = offset_reg;
-  else
-    op->value.mem.offset.exp = offset_exp;
-
-  if (base_reg.num >= tic6x_num_registers)
-    as_bad(_("register number %u not supported on this architecture"), base_reg.num);
-  
-  if (offset_is_reg && offset_reg.num >= tic6x_num_registers)
-    as_bad(_("register number %u not supported on this architecture"), offset_reg.num);
-
-  return true;
-}
-
-static bool
-tic6x_parse_memory_modifier(char **mq, tic6x_mem_mod *mem_mod)
-{
-  switch (**mq)
-    {
-    case '+':
-      if ((*mq)[1] == '+')
-        {
-          *mem_mod = tic6x_mem_mod_preinc;
-          *mq += 2;
-        }
+      if (*mq == '*')
+	mq++;
       else
-        {
-          *mem_mod = tic6x_mem_mod_plus;
-          (*mq)++;
-        }
-      break;
+	mem_ok = false;
 
-    case '-':
-      if ((*mq)[1] == '-')
-        {
-          *mem_mod = tic6x_mem_mod_predec;
-          *mq += 2;
-        }
-      else
-        {
-          *mem_mod = tic6x_mem_mod_minus;
-          (*mq)++;
-        }
-      break;
+      if (mem_ok)
+	{
+	  skip_whitespace (mq);
+	  switch (*mq)
+	    {
+	    case '+':
+	      if (mq[1] == '+')
+		{
+		  mem_mod = tic6x_mem_mod_preinc;
+		  mq += 2;
+		}
+	      else
+		{
+		  mem_mod = tic6x_mem_mod_plus;
+		  mq++;
+		}
+	      break;
 
-    default:
-      break;
+	    case '-':
+	      if (mq[1] == '-')
+		{
+		  mem_mod = tic6x_mem_mod_predec;
+		  mq += 2;
+		}
+	      else
+		{
+		  mem_mod = tic6x_mem_mod_minus;
+		  mq++;
+		}
+	      break;
+
+	    default:
+	      break;
+	    }
+	}
+
+      if (mem_ok)
+	{
+	  skip_whitespace (mq);
+	  mem_ok = tic6x_parse_register (&mq, &base_reg);
+	}
+
+      if (mem_ok && mem_mod == tic6x_mem_mod_none)
+	{
+	  skip_whitespace (mq);
+	  if (mq[0] == '+' && mq[1] == '+')
+	    {
+	      mem_mod = tic6x_mem_mod_postinc;
+	      mq += 2;
+	    }
+	  else if (mq[0] == '-' && mq[1] == '-')
+	    {
+	      mem_mod = tic6x_mem_mod_postdec;
+	      mq += 2;
+	    }
+	}
+
+      permit_offset = (mem_mod != tic6x_mem_mod_none);
+      require_offset = (mem_mod == tic6x_mem_mod_plus || mem_mod == tic6x_mem_mod_minus);
+      scaled = tic6x_offset_none;
+
+      if (mem_ok && permit_offset)
+	{
+	  char endc = 0;
+
+	  skip_whitespace (mq);
+	  switch (*mq)
+	    {
+	    case '[':
+	      scaled = tic6x_offset_scaled;
+	      mq++;
+	      endc = ']';
+	      break;
+
+	    case '(':
+	      scaled = tic6x_offset_unscaled;
+	      mq++;
+	      endc = ')';
+	      break;
+
+	    default:
+	      break;
+	    }
+	  if (scaled != tic6x_offset_none)
+	    {
+	      skip_whitespace (mq);
+	      if (scaled == tic6x_offset_scaled
+		  || (op_forms & TIC6X_OP_MEM_UNREG))
+		{
+		  bool reg_ok;
+		  char *rq = mq;
+
+		  reg_ok = tic6x_parse_register (&rq, &offset_reg);
+		  if (reg_ok)
+		    {
+		      skip_whitespace (rq);
+		      if (*rq == endc)
+			{
+			  mq = rq;
+			  offset_is_reg = true;
+			}
+		    }
+		}
+	      if (!offset_is_reg)
+		{
+		  char *save_input_line_pointer;
+
+		  save_input_line_pointer = input_line_pointer;
+		  input_line_pointer = mq;
+		  expression (&offset_exp);
+		  mq = input_line_pointer;
+		  input_line_pointer = save_input_line_pointer;
+		}
+	      skip_whitespace (mq);
+	      if (*mq == endc)
+		mq++;
+	      else
+		mem_ok = false;
+	    }
+	}
+
+      if (mem_ok && require_offset && scaled == tic6x_offset_none)
+	mem_ok = false;
+
+      if (mem_ok)
+	{
+	  skip_whitespace (mq);
+	  if (!is_end_of_stmt (*mq) && *mq != ',')
+	    mem_ok = false;
+	}
+
+      if (mem_ok)
+	{
+	  op->form = op_forms & (TIC6X_OP_MEM_NOUNREG | TIC6X_OP_MEM_UNREG);
+	  op->value.mem.base_reg = base_reg;
+	  op->value.mem.mod = mem_mod;
+	  op->value.mem.scaled = scaled;
+	  op->value.mem.offset_is_reg = offset_is_reg;
+	  if (offset_is_reg)
+	    op->value.mem.offset.reg = offset_reg;
+	  else
+	    op->value.mem.offset.exp = offset_exp;
+	  operand_parsed = true;
+	  q = mq;
+	  if (base_reg.num >= tic6x_num_registers)
+	    as_bad (_("register number %u not supported on this architecture"),
+		    base_reg.num);
+	  if (offset_is_reg && offset_reg.num >= tic6x_num_registers)
+	    as_bad (_("register number %u not supported on this architecture"),
+		    offset_reg.num);
+	}
     }
-  
-  skip_whitespace(*mq);
-  return true;
-}
 
-static void
-tic6x_parse_post_modifier(char **mq, tic6x_mem_mod *mem_mod)
-{
-  skip_whitespace(*mq);
-  
-  if ((*mq)[0] == '+' && (*mq)[1] == '+')
+  if (!operand_parsed && (op_forms & (TIC6X_OP_REG | TIC6X_OP_REGPAIR)))
     {
-      *mem_mod = tic6x_mem_mod_postinc;
-      *mq += 2;
-    }
-  else if ((*mq)[0] == '-' && (*mq)[1] == '-')
-    {
-      *mem_mod = tic6x_mem_mod_postdec;
-      *mq += 2;
-    }
-}
+      tic6x_register first_reg, second_reg;
+      bool reg_ok;
+      char *rq = q;
 
-static bool
-tic6x_parse_memory_offset(char **mq, tic6x_mem_scaling *scaled, bool *offset_is_reg,
-                          tic6x_register *offset_reg, expressionS *offset_exp,
-                          unsigned int op_forms)
-{
-  char endc = 0;
-  skip_whitespace(*mq);
+      reg_ok = tic6x_parse_register (&rq, &first_reg);
 
-  switch (**mq)
-    {
-    case '[':
-      *scaled = tic6x_offset_scaled;
-      (*mq)++;
-      endc = ']';
-      break;
-
-    case '(':
-      *scaled = tic6x_offset_unscaled;
-      (*mq)++;
-      endc = ')';
-      break;
-
-    default:
-      return true;
-    }
-
-  skip_whitespace(*mq);
-  
-  if (*scaled == tic6x_offset_scaled || (op_forms & TIC6X_OP_MEM_UNREG))
-    {
-      char *rq = *mq;
-      if (tic6x_parse_register(&rq, offset_reg))
-        {
-          skip_whitespace(rq);
-          if (*rq == endc)
-            {
-              *mq = rq;
-              *offset_is_reg = true;
-            }
-        }
+      if (reg_ok)
+	{
+	  if (*rq == ':' && (op_forms & TIC6X_OP_REGPAIR))
+	    {
+	      rq++;
+	      reg_ok = tic6x_parse_register (&rq, &second_reg);
+	      if (reg_ok)
+		{
+		  skip_whitespace (rq);
+		  if (is_end_of_stmt (*rq) || *rq == ',')
+		    {
+		      if ((second_reg.num & 1)
+			  || (first_reg.num != second_reg.num + 1)
+			  || (first_reg.side != second_reg.side))
+			as_bad (_("register pair for operand %u of '%.*s'"
+				  " not a valid even/odd pair"), opno,
+				opc_len, str);
+		      op->form = TIC6X_OP_REGPAIR;
+		      op->value.reg = second_reg;
+		      operand_parsed = true;
+		      q = rq;
+		    }
+		}
+	    }
+	  else if (op_forms & TIC6X_OP_REG)
+	    {
+	      skip_whitespace (rq);
+	      if (is_end_of_stmt (*rq) || *rq == ',')
+		{
+		  op->form = TIC6X_OP_REG;
+		  op->value.reg = first_reg;
+		  operand_parsed = true;
+		  q = rq;
+		}
+	    }
+	}
+      if (operand_parsed)
+	{
+	  if (first_reg.num >= tic6x_num_registers)
+	    as_bad (_("register number %u not supported on this architecture"),
+		    first_reg.num);
+	  if (op->form == TIC6X_OP_REGPAIR
+	      && second_reg.num >= tic6x_num_registers)
+	    as_bad (_("register number %u not supported on this architecture"),
+		    second_reg.num);
+	}
     }
 
-  if (!*offset_is_reg)
+  if (!operand_parsed && (op_forms & TIC6X_OP_EXP))
     {
-      char *save_input_line_pointer = input_line_pointer;
-      input_line_pointer = *mq;
-      expression(offset_exp);
-      *mq = input_line_pointer;
+      char *save_input_line_pointer;
+
+      save_input_line_pointer = input_line_pointer;
+      input_line_pointer = q;
+      op->form = TIC6X_OP_EXP;
+      expression (&op->value.exp);
+      q = input_line_pointer;
       input_line_pointer = save_input_line_pointer;
+      operand_parsed = true;
     }
 
-  skip_whitespace(*mq);
-  if (**mq != endc)
-    return false;
-  
-  (*mq)++;
-  return true;
-}
-
-static bool
-tic6x_try_parse_register_operand(char *q, tic6x_operand *op, unsigned int op_forms,
-                                 unsigned int opno, char *str, int opc_len)
-{
-  tic6x_register first_reg, second_reg;
-  char *rq = q;
-
-  if (!tic6x_parse_register(&rq, &first_reg))
-    return false;
-
-  if (*rq == ':' && (op_forms & TIC6X_OP_REGPAIR))
+  if (operand_parsed)
     {
-      rq++;
-      if (!tic6x_parse_register(&rq, &second_reg))
-        return false;
-
-      skip_whitespace(rq);
-      if (!is_end_of_stmt(*rq) && *rq != ',')
-        return false;
-
-      if ((second_reg.num & 1) || (first_reg.num != second_reg.num + 1) ||
-          (first_reg.side != second_reg.side))
-        as_bad(_("register pair for operand %u of '%.*s' not a valid even/odd pair"),
-               opno, opc_len, str);
-
-      op->form = TIC6X_OP_REGPAIR;
-      op->value.reg = second_reg;
-    }
-  else if (op_forms & TIC6X_OP_REG)
-    {
-      skip_whitespace(rq);
-      if (!is_end_of_stmt(*rq) && *rq != ',')
-        return false;
-
-      op->form = TIC6X_OP_REG;
-      op->value.reg = first_reg;
+      skip_whitespace (q);
+      if (!is_end_of_stmt (*q) && *q != ',')
+	{
+	  operand_parsed = false;
+	  as_bad (_("junk after operand %u of '%.*s'"), opno,
+		  opc_len, str);
+	  while (!is_end_of_stmt (*q) && *q != ',')
+	    q++;
+	}
     }
   else
     {
-      return false;
+      switch (op_forms)
+	{
+	case TIC6X_OP_REG | TIC6X_OP_REGPAIR:
+	  as_bad (_("bad register or register pair for operand %u of '%.*s'"),
+		  opno, opc_len, str);
+	  break;
+
+	case TIC6X_OP_REG | TIC6X_OP_CTRL:
+	case TIC6X_OP_REG:
+	  as_bad (_("bad register for operand %u of '%.*s'"),
+		  opno, opc_len, str);
+	  break;
+
+	case TIC6X_OP_REGPAIR:
+	  as_bad (_("bad register pair for operand %u of '%.*s'"),
+		  opno, opc_len, str);
+	  break;
+
+	case TIC6X_OP_FUNC_UNIT:
+	  as_bad (_("bad functional unit for operand %u of '%.*s'"),
+		  opno, opc_len, str);
+	  break;
+
+	default:
+	  as_bad (_("bad operand %u of '%.*s'"),
+		  opno, opc_len, str);
+	  break;
+
+	}
+      while (!is_end_of_stmt (*q) && *q != ',')
+	q++;
     }
-
-  if (first_reg.num >= tic6x_num_registers)
-    as_bad(_("register number %u not supported on this architecture"), first_reg.num);
-  
-  if (op->form == TIC6X_OP_REGPAIR && second_reg.num >= tic6x_num_registers)
-    as_bad(_("register number %u not supported on this architecture"), second_reg.num);
-
-  tic6x_validate_operand_tail(&rq, opno, opc_len, str);
-  return true;
-}
-
-static bool
-tic6x_try_parse_expression(char *q, tic6x_operand *op)
-{
-  char *save_input_line_pointer = input_line_pointer;
-  input_line_pointer = q;
-  op->form = TIC6X_OP_EXP;
-  expression(&op->value.exp);
-  q = input_line_pointer;
-  input_line_pointer = save_input_line_pointer;
-  
-  tic6x_validate_operand_tail(&q, 0, 0, NULL);
-  return true;
-}
-
-static void
-tic6x_validate_operand_tail(char **q, unsigned int opno, int opc_len, char *str)
-{
-  skip_whitespace(*q);
-  if (!is_end_of_stmt(**q) && **q != ',')
-    {
-      if (str)
-        as_bad(_("junk after operand %u of '%.*s'"), opno, opc_len, str);
-      
-      while (!is_end_of_stmt(**q) && **q != ',')
-        (*q)++;
-    }
-}
-
-static void
-tic6x_report_parse_error(unsigned int op_forms, unsigned int opno, int opc_len, char *str)
-{
-  switch (op_forms)
-    {
-    case TIC6X_OP_REG | TIC6X_OP_REGPAIR:
-      as_bad(_("bad register or register pair for operand %u of '%.*s'"),
-             opno, opc_len, str);
-      break;
-
-    case TIC6X_OP_REG | TIC6X_OP_CTRL:
-    case TIC6X_OP_REG:
-      as_bad(_("bad register for operand %u of '%.*s'"), opno, opc_len, str);
-      break;
-
-    case TIC6X_OP_REGPAIR:
-      as_bad(_("bad register pair for operand %u of '%.*s'"), opno, opc_len, str);
-      break;
-
-    case TIC6X_OP_FUNC_UNIT:
-      as_bad(_("bad functional unit for operand %u of '%.*s'"), opno, opc_len, str);
-      break;
-
-    default:
-      as_bad(_("bad operand %u of '%.*s'"), opno, opc_len, str);
-      break;
-    }
+  *p = q;
+  return operand_parsed;
 }
 
 /* Table of assembler operators and associated O_* values.  */
@@ -1940,9 +1839,8 @@ tic6x_parse_name (const char *name, expressionS *exprP,
     }
 
   name_start = p;
-  p++;
-  while (is_part_of_name (*p))
-    p++;
+  while (is_part_of_name (*++p))
+    ;
   name_end = p;
   skip_whitespace (p);
 
@@ -1965,9 +1863,8 @@ tic6x_parse_name (const char *name, expressionS *exprP,
 	}
 
       op_name_start = p;
-      p++;
-      while (is_part_of_name (*p))
-	p++;
+      while (is_part_of_name (*++p))
+	;
       op_name_end = p;
       skip_whitespace (p);
 
@@ -2022,14 +1919,90 @@ tic6x_fix_new_exp (fragS *frag, int where, int size, expressionS *exp,
   symbolS *subsy = NULL;
   fixS *fix;
 
-  new_reloc = tic6x_get_reloc_for_exp_type(exp->X_op, r_type);
-  if (new_reloc == BFD_RELOC_NONE)
-    return;
-
-  if (exp->X_op == O_pcr_offset)
-    subsy = exp->X_op_symbol;
-
-  if (exp->X_op != O_symbol && exp->X_op != O_pcr_offset && pcrel)
+  if (exp->X_op == O_dsbt_index)
+    {
+      if (r_type == BFD_RELOC_C6000_SBR_U15_W)
+	new_reloc = BFD_RELOC_C6000_DSBT_INDEX;
+      else
+	{
+	  as_bad (_("$DSBT_INDEX not supported in this context"));
+	  return;
+	}
+    }
+  else if (exp->X_op == O_got)
+    {
+      if (r_type == BFD_RELOC_C6000_SBR_U15_W)
+	new_reloc = BFD_RELOC_C6000_SBR_GOT_U15_W;
+      else
+	{
+	  as_bad (_("$GOT not supported in this context"));
+	  return;
+	}
+    }
+  else if (exp->X_op == O_dpr_got)
+    {
+      if (r_type == BFD_RELOC_C6000_ABS_L16)
+	new_reloc = BFD_RELOC_C6000_SBR_GOT_L16_W;
+      else if (r_type == BFD_RELOC_C6000_ABS_H16)
+	new_reloc = BFD_RELOC_C6000_SBR_GOT_H16_W;
+      else
+	{
+	  as_bad (_("$DPR_GOT not supported in this context"));
+	  return;
+	}
+    }
+  else if (exp->X_op == O_dpr_byte)
+    {
+      if (r_type == BFD_RELOC_C6000_ABS_S16)
+	new_reloc = BFD_RELOC_C6000_SBR_S16;
+      else if (r_type == BFD_RELOC_C6000_ABS_L16)
+	new_reloc = BFD_RELOC_C6000_SBR_L16_B;
+      else if (r_type == BFD_RELOC_C6000_ABS_H16)
+	new_reloc = BFD_RELOC_C6000_SBR_H16_B;
+      else
+	{
+	  as_bad (_("$DPR_BYTE not supported in this context"));
+	  return;
+	}
+    }
+  else if (exp->X_op == O_dpr_hword)
+    {
+      if (r_type == BFD_RELOC_C6000_ABS_L16)
+	new_reloc = BFD_RELOC_C6000_SBR_L16_H;
+      else if (r_type == BFD_RELOC_C6000_ABS_H16)
+	new_reloc = BFD_RELOC_C6000_SBR_H16_H;
+      else
+	{
+	  as_bad (_("$DPR_HWORD not supported in this context"));
+	  return;
+	}
+    }
+  else if (exp->X_op == O_dpr_word)
+    {
+      if (r_type == BFD_RELOC_C6000_ABS_L16)
+	new_reloc = BFD_RELOC_C6000_SBR_L16_W;
+      else if (r_type == BFD_RELOC_C6000_ABS_H16)
+	new_reloc = BFD_RELOC_C6000_SBR_H16_W;
+      else
+	{
+	  as_bad (_("$DPR_WORD not supported in this context"));
+	  return;
+	}
+    }
+  else if (exp->X_op == O_pcr_offset)
+    {
+      subsy = exp->X_op_symbol;
+      if (r_type == BFD_RELOC_C6000_ABS_S16 || r_type == BFD_RELOC_C6000_ABS_L16)
+	new_reloc = BFD_RELOC_C6000_PCR_L16;
+      else if (r_type == BFD_RELOC_C6000_ABS_H16)
+	new_reloc = BFD_RELOC_C6000_PCR_H16;
+      else
+	{
+	  as_bad (_("$PCR_OFFSET not supported in this context"));
+	  return;
+	}
+    }
+  else if (exp->X_op != O_symbol && pcrel)
     {
       as_bad (_("invalid PC-relative operand"));
       return;
@@ -2040,106 +2013,44 @@ tic6x_fix_new_exp (fragS *frag, int where, int size, expressionS *exp,
   else
     fix = fix_new (frag, where, size, exp->X_add_symbol, exp->X_add_number,
 		   pcrel, new_reloc);
-  
   fix->tc_fix_data.fix_subsy = subsy;
   fix->tc_fix_data.fix_adda = fix_adda;
-}
-
-static bfd_reloc_code_real_type
-tic6x_get_reloc_for_exp_type(operatorT op, bfd_reloc_code_real_type r_type)
-{
-  switch (op)
-    {
-    case O_dsbt_index:
-      if (r_type == BFD_RELOC_C6000_SBR_U15_W)
-        return BFD_RELOC_C6000_DSBT_INDEX;
-      as_bad (_("$DSBT_INDEX not supported in this context"));
-      return BFD_RELOC_NONE;
-
-    case O_got:
-      if (r_type == BFD_RELOC_C6000_SBR_U15_W)
-        return BFD_RELOC_C6000_SBR_GOT_U15_W;
-      as_bad (_("$GOT not supported in this context"));
-      return BFD_RELOC_NONE;
-
-    case O_dpr_got:
-      if (r_type == BFD_RELOC_C6000_ABS_L16)
-        return BFD_RELOC_C6000_SBR_GOT_L16_W;
-      if (r_type == BFD_RELOC_C6000_ABS_H16)
-        return BFD_RELOC_C6000_SBR_GOT_H16_W;
-      as_bad (_("$DPR_GOT not supported in this context"));
-      return BFD_RELOC_NONE;
-
-    case O_dpr_byte:
-      if (r_type == BFD_RELOC_C6000_ABS_S16)
-        return BFD_RELOC_C6000_SBR_S16;
-      if (r_type == BFD_RELOC_C6000_ABS_L16)
-        return BFD_RELOC_C6000_SBR_L16_B;
-      if (r_type == BFD_RELOC_C6000_ABS_H16)
-        return BFD_RELOC_C6000_SBR_H16_B;
-      as_bad (_("$DPR_BYTE not supported in this context"));
-      return BFD_RELOC_NONE;
-
-    case O_dpr_hword:
-      if (r_type == BFD_RELOC_C6000_ABS_L16)
-        return BFD_RELOC_C6000_SBR_L16_H;
-      if (r_type == BFD_RELOC_C6000_ABS_H16)
-        return BFD_RELOC_C6000_SBR_H16_H;
-      as_bad (_("$DPR_HWORD not supported in this context"));
-      return BFD_RELOC_NONE;
-
-    case O_dpr_word:
-      if (r_type == BFD_RELOC_C6000_ABS_L16)
-        return BFD_RELOC_C6000_SBR_L16_W;
-      if (r_type == BFD_RELOC_C6000_ABS_H16)
-        return BFD_RELOC_C6000_SBR_H16_W;
-      as_bad (_("$DPR_WORD not supported in this context"));
-      return BFD_RELOC_NONE;
-
-    case O_pcr_offset:
-      if (r_type == BFD_RELOC_C6000_ABS_S16 || r_type == BFD_RELOC_C6000_ABS_L16)
-        return BFD_RELOC_C6000_PCR_L16;
-      if (r_type == BFD_RELOC_C6000_ABS_H16)
-        return BFD_RELOC_C6000_PCR_H16;
-      as_bad (_("$PCR_OFFSET not supported in this context"));
-      return BFD_RELOC_NONE;
-
-    default:
-      return BFD_RELOC_UNUSED;
-    }
 }
 
 /* Generate a fix for a constant (.word etc.).  Needed to ensure these
    go through the error checking in tic6x_fix_new_exp.  */
 
-void tic6x_cons_fix_new(fragS *frag, int where, int size, expressionS *exp,
-                        bfd_reloc_code_real_type r_type)
+void
+tic6x_cons_fix_new (fragS *frag, int where, int size, expressionS *exp,
+		    bfd_reloc_code_real_type r_type)
 {
-    static const bfd_reloc_code_real_type size_to_reloc[] = {
-        [1] = BFD_RELOC_8,
-        [2] = BFD_RELOC_16,
-        [4] = BFD_RELOC_32
-    };
-    
-    if (size < 1 || size > 4 || size == 3) {
-        as_bad(_("no %d-byte relocations available"), size);
-        return;
-    }
-    
-    r_type = size_to_reloc[size];
-    tic6x_fix_new_exp(frag, where, size, exp, 0, r_type, false);
+  bfd_reloc_code_real_type reloc_type;
+  
+  if (size == 1) {
+    reloc_type = BFD_RELOC_8;
+  } else if (size == 2) {
+    reloc_type = BFD_RELOC_16;
+  } else if (size == 4) {
+    reloc_type = BFD_RELOC_32;
+  } else {
+    as_bad (_("no %d-byte relocations available"), size);
+    return;
+  }
+
+  tic6x_fix_new_exp (frag, where, size, exp, 0, reloc_type, false);
 }
 
 /* Initialize target-specific fix data.  */
 
-void tic6x_init_fix_data(fixS *fixP)
+void
+tic6x_init_fix_data (fixS *fixP)
 {
-    if (fixP == NULL) {
-        return;
-    }
-    
-    fixP->tc_fix_data.fix_adda = false;
-    fixP->tc_fix_data.fix_subsy = NULL;
+  if (fixP == NULL) {
+    return;
+  }
+  
+  fixP->tc_fix_data.fix_adda = false;
+  fixP->tc_fix_data.fix_subsy = NULL;
 }
 
 /* Return true if the fix can be handled by GAS, false if it must
@@ -2148,8 +2059,8 @@ void tic6x_init_fix_data(fixS *fixP)
 bool
 tic6x_fix_adjustable (fixS *fixP)
 {
-  if (fixP == NULL) {
-    return false;
+  if (!fixP) {
+    return 0;
   }
 
   switch (fixP->fx_r_type)
@@ -2161,9 +2072,10 @@ tic6x_fix_adjustable (fixS *fixP)
     case BFD_RELOC_C6000_PREL31:
     case BFD_RELOC_C6000_PCR_H16:
     case BFD_RELOC_C6000_PCR_L16:
-      return false;
+      return 0;
+
     default:
-      return true;
+      return 1;
     }
 }
 
@@ -2173,35 +2085,47 @@ tic6x_fix_adjustable (fixS *fixP)
 static unsigned int
 tic6x_coarse_operand_form (tic6x_operand_form form)
 {
-  static const unsigned int form_map[] = {
-    [tic6x_operand_asm_const] = TIC6X_OP_EXP,
-    [tic6x_operand_link_const] = TIC6X_OP_EXP,
-    [tic6x_operand_reg] = TIC6X_OP_REG,
-    [tic6x_operand_xreg] = TIC6X_OP_REG,
-    [tic6x_operand_dreg] = TIC6X_OP_REG,
-    [tic6x_operand_areg] = TIC6X_OP_REG,
-    [tic6x_operand_retreg] = TIC6X_OP_REG,
-    [tic6x_operand_regpair] = TIC6X_OP_REGPAIR,
-    [tic6x_operand_xregpair] = TIC6X_OP_REGPAIR,
-    [tic6x_operand_dregpair] = TIC6X_OP_REGPAIR,
-    [tic6x_operand_irp] = TIC6X_OP_IRP,
-    [tic6x_operand_nrp] = TIC6X_OP_NRP,
-    [tic6x_operand_ctrl] = TIC6X_OP_CTRL,
-    [tic6x_operand_mem_short] = TIC6X_OP_MEM_NOUNREG,
-    [tic6x_operand_mem_long] = TIC6X_OP_MEM_NOUNREG,
-    [tic6x_operand_mem_deref] = TIC6X_OP_MEM_NOUNREG,
-    [tic6x_operand_mem_ndw] = TIC6X_OP_MEM_UNREG,
-    [tic6x_operand_func_unit] = TIC6X_OP_FUNC_UNIT
-  };
+  switch (form)
+    {
+    case tic6x_operand_asm_const:
+    case tic6x_operand_link_const:
+      return TIC6X_OP_EXP;
 
-  if (form >= sizeof(form_map) / sizeof(form_map[0]))
-    abort ();
+    case tic6x_operand_reg:
+    case tic6x_operand_xreg:
+    case tic6x_operand_dreg:
+    case tic6x_operand_areg:
+    case tic6x_operand_retreg:
+      return TIC6X_OP_REG;
 
-  unsigned int result = form_map[form];
-  if (result == 0 && form != 0)
-    abort ();
+    case tic6x_operand_regpair:
+    case tic6x_operand_xregpair:
+    case tic6x_operand_dregpair:
+      return TIC6X_OP_REGPAIR;
 
-  return result;
+    case tic6x_operand_irp:
+      return TIC6X_OP_IRP;
+
+    case tic6x_operand_nrp:
+      return TIC6X_OP_NRP;
+
+    case tic6x_operand_ctrl:
+      return TIC6X_OP_CTRL;
+
+    case tic6x_operand_mem_short:
+    case tic6x_operand_mem_long:
+    case tic6x_operand_mem_deref:
+      return TIC6X_OP_MEM_NOUNREG;
+
+    case tic6x_operand_mem_ndw:
+      return TIC6X_OP_MEM_UNREG;
+
+    case tic6x_operand_func_unit:
+      return TIC6X_OP_FUNC_UNIT;
+
+    default:
+      return 0;
+    }
 }
 
 /* How an operand may match or not match a desired form.  If different
@@ -2247,7 +2171,8 @@ tic6x_operand_matches_form (const tic6x_operand *op, tic6x_operand_form form,
   switch (form)
     {
     case tic6x_operand_asm_const:
-      return (op->value.exp.X_op == O_constant) ? tic6x_match_matches : tic6x_match_non_const;
+      return (op->value.exp.X_op == O_constant) ? 
+             tic6x_match_matches : tic6x_match_non_const;
 
     case tic6x_operand_link_const:
     case tic6x_operand_irp:
@@ -2257,53 +2182,56 @@ tic6x_operand_matches_form (const tic6x_operand *op, tic6x_operand_form form,
 
     case tic6x_operand_reg:
     case tic6x_operand_regpair:
-      return (op->value.reg.side == side) ? tic6x_match_matches : tic6x_match_wrong_side;
+      return (op->value.reg.side == side) ? 
+             tic6x_match_matches : tic6x_match_wrong_side;
 
     case tic6x_operand_xreg:
     case tic6x_operand_xregpair:
-      return (op->value.reg.side == cross) ? tic6x_match_matches : tic6x_match_wrong_side;
+      return (op->value.reg.side == cross) ? 
+             tic6x_match_matches : tic6x_match_wrong_side;
 
     case tic6x_operand_dreg:
     case tic6x_operand_dregpair:
-      return (op->value.reg.side == data_side) ? tic6x_match_matches : tic6x_match_wrong_side;
+      return (op->value.reg.side == data_side) ? 
+             tic6x_match_matches : tic6x_match_wrong_side;
 
     case tic6x_operand_areg:
       if (op->value.reg.side != cross)
 	return tic6x_match_wrong_side;
-      if (op->value.reg.side == 2 && (op->value.reg.num == 14 || op->value.reg.num == 15))
+      if (op->value.reg.side == 2 && 
+          (op->value.reg.num == 14 || op->value.reg.num == 15))
 	return tic6x_match_matches;
       return tic6x_match_bad_address;
 
     case tic6x_operand_retreg:
       if (op->value.reg.side != side)
 	return tic6x_match_wrong_side;
-      return (op->value.reg.num != 3) ? tic6x_match_bad_return : tic6x_match_matches;
+      if (op->value.reg.num != 3)
+	return tic6x_match_bad_return;
+      return tic6x_match_matches;
 
     case tic6x_operand_ctrl:
       if (rw == tic6x_rw_read)
 	{
-	  if (tic6x_ctrl_table[op->value.ctrl].rw == tic6x_rw_read ||
-	      tic6x_ctrl_table[op->value.ctrl].rw == tic6x_rw_read_write)
-	    return tic6x_match_matches;
-	  return tic6x_match_ctrl_write_only;
+	  tic6x_rw ctrl_rw = tic6x_ctrl_table[op->value.ctrl].rw;
+	  return (ctrl_rw == tic6x_rw_read || ctrl_rw == tic6x_rw_read_write) ?
+	         tic6x_match_matches : tic6x_match_ctrl_write_only;
 	}
       if (rw == tic6x_rw_write)
 	{
-	  if (tic6x_ctrl_table[op->value.ctrl].rw == tic6x_rw_write ||
-	      tic6x_ctrl_table[op->value.ctrl].rw == tic6x_rw_read_write)
-	    return tic6x_match_matches;
-	  return tic6x_match_ctrl_read_only;
+	  tic6x_rw ctrl_rw = tic6x_ctrl_table[op->value.ctrl].rw;
+	  return (ctrl_rw == tic6x_rw_write || ctrl_rw == tic6x_rw_read_write) ?
+	         tic6x_match_matches : tic6x_match_ctrl_read_only;
 	}
-      return tic6x_match_bad_mem;
+      abort ();
 
     case tic6x_operand_mem_deref:
       if (op->value.mem.mod != tic6x_mem_mod_none)
 	return tic6x_match_bad_mem;
       if (op->value.mem.scaled != tic6x_offset_none)
-	return tic6x_match_bad_mem;
-      if (op->value.mem.base_reg.side != side)
-	return tic6x_match_bad_mem;
-      return tic6x_match_matches;
+	abort ();
+      return (op->value.mem.base_reg.side == side) ? 
+             tic6x_match_matches : tic6x_match_bad_mem;
 
     case tic6x_operand_mem_short:
     case tic6x_operand_mem_ndw:
@@ -2312,51 +2240,62 @@ tic6x_operand_matches_form (const tic6x_operand *op, tic6x_operand_form form,
       if (op->value.mem.mod == tic6x_mem_mod_none)
 	{
 	  if (op->value.mem.scaled != tic6x_offset_none)
-	    return tic6x_match_bad_mem;
+	    abort ();
 	  return tic6x_match_matches;
 	}
       if (op->value.mem.scaled == tic6x_offset_none)
 	{
 	  if (op->value.mem.mod == tic6x_mem_mod_plus ||
 	      op->value.mem.mod == tic6x_mem_mod_minus)
-	    return tic6x_match_bad_mem;
+	    abort ();
 	  return tic6x_match_matches;
 	}
       if (op->value.mem.offset_is_reg)
 	{
 	  if (op->value.mem.scaled == tic6x_offset_unscaled &&
 	      form != tic6x_operand_mem_ndw)
-	    return tic6x_match_bad_mem;
-	  return (op->value.mem.offset.reg.side == side) ? tic6x_match_matches : tic6x_match_bad_mem;
+	    abort ();
+	  return (op->value.mem.offset.reg.side == side) ? 
+	         tic6x_match_matches : tic6x_match_bad_mem;
 	}
-      return (op->value.mem.offset.exp.X_op == O_constant) ? tic6x_match_matches : tic6x_match_bad_mem;
+      return (op->value.mem.offset.exp.X_op == O_constant) ? 
+             tic6x_match_matches : tic6x_match_bad_mem;
 
     case tic6x_operand_mem_long:
       if (op->value.mem.base_reg.side != 2 ||
-	  (op->value.mem.base_reg.num != 14 && op->value.mem.base_reg.num != 15))
+          (op->value.mem.base_reg.num != 14 && op->value.mem.base_reg.num != 15))
 	return tic6x_match_bad_mem;
-      
-      if (op->value.mem.mod == tic6x_mem_mod_none)
+
+      switch (op->value.mem.mod)
 	{
+	case tic6x_mem_mod_none:
 	  if (op->value.mem.scaled != tic6x_offset_none)
-	    return tic6x_match_bad_mem;
+	    abort ();
 	  return tic6x_match_matches;
-	}
-      if (op->value.mem.mod == tic6x_mem_mod_plus)
-	{
+
+	case tic6x_mem_mod_plus:
 	  if (op->value.mem.scaled == tic6x_offset_none)
-	    return tic6x_match_bad_mem;
+	    abort ();
 	  if (op->value.mem.offset_is_reg)
 	    return tic6x_match_bad_mem;
 	  if (op->value.mem.scaled == tic6x_offset_scaled &&
 	      op->value.mem.offset.exp.X_op != O_constant)
 	    return tic6x_match_bad_mem;
 	  return tic6x_match_matches;
+
+	case tic6x_mem_mod_minus:
+	case tic6x_mem_mod_preinc:
+	case tic6x_mem_mod_predec:
+	case tic6x_mem_mod_postinc:
+	case tic6x_mem_mod_postdec:
+	  return tic6x_match_bad_mem;
+
+	default:
+	  abort ();
 	}
-      return tic6x_match_bad_mem;
 
     default:
-      return tic6x_match_bad_mem;
+      abort ();
     }
 }
 
@@ -2366,20 +2305,20 @@ tic6x_operand_matches_form (const tic6x_operand *op, tic6x_operand_form form,
 static unsigned int
 tic6x_dpr_shift (tic6x_coding_method coding)
 {
-  static const unsigned int shift_values[] = {
-    [tic6x_coding_ulcst_dpr_byte] = 0,
-    [tic6x_coding_ulcst_dpr_half] = 1,
-    [tic6x_coding_ulcst_dpr_word] = 2
-  };
-  
-  if (coding == tic6x_coding_ulcst_dpr_byte || 
-      coding == tic6x_coding_ulcst_dpr_half || 
-      coding == tic6x_coding_ulcst_dpr_word)
+  switch (coding)
     {
-      return shift_values[coding];
+    case tic6x_coding_ulcst_dpr_byte:
+      return 0;
+
+    case tic6x_coding_ulcst_dpr_half:
+      return 1;
+
+    case tic6x_coding_ulcst_dpr_word:
+      return 2;
+
+    default:
+      return 0;
     }
-  
-  return 0;
 }
 
 /* Return the relocation used with DP-relative coding method
@@ -2388,20 +2327,20 @@ tic6x_dpr_shift (tic6x_coding_method coding)
 static bfd_reloc_code_real_type
 tic6x_dpr_reloc (tic6x_coding_method coding)
 {
-  static const bfd_reloc_code_real_type reloc_map[] = {
-    [tic6x_coding_ulcst_dpr_byte] = BFD_RELOC_C6000_SBR_U15_B,
-    [tic6x_coding_ulcst_dpr_half] = BFD_RELOC_C6000_SBR_U15_H,
-    [tic6x_coding_ulcst_dpr_word] = BFD_RELOC_C6000_SBR_U15_W
-  };
-
-  if (coding == tic6x_coding_ulcst_dpr_byte ||
-      coding == tic6x_coding_ulcst_dpr_half ||
-      coding == tic6x_coding_ulcst_dpr_word)
+  switch (coding)
     {
-      return reloc_map[coding];
-    }
+    case tic6x_coding_ulcst_dpr_byte:
+      return BFD_RELOC_C6000_SBR_U15_B;
 
-  return BFD_RELOC_NONE;
+    case tic6x_coding_ulcst_dpr_half:
+      return BFD_RELOC_C6000_SBR_U15_H;
+
+    case tic6x_coding_ulcst_dpr_word:
+      return BFD_RELOC_C6000_SBR_U15_W;
+
+    default:
+      return BFD_RELOC_NONE;
+    }
 }
 
 /* Given a memory reference *MEM_REF as originally parsed, fill in
@@ -2410,14 +2349,16 @@ tic6x_dpr_reloc (tic6x_coding_method coding)
 static void
 tic6x_default_mem_ref (tic6x_mem_ref *mem_ref)
 {
-  if (!mem_ref)
+  if (mem_ref == NULL) {
     return;
+  }
 
   switch (mem_ref->mod)
     {
     case tic6x_mem_mod_none:
-      if (mem_ref->scaled != tic6x_offset_none)
+      if (mem_ref->scaled != tic6x_offset_none) {
         return;
+      }
       mem_ref->mod = tic6x_mem_mod_plus;
       mem_ref->scaled = tic6x_offset_unscaled;
       mem_ref->offset_is_reg = false;
@@ -2429,8 +2370,9 @@ tic6x_default_mem_ref (tic6x_mem_ref *mem_ref)
 
     case tic6x_mem_mod_plus:
     case tic6x_mem_mod_minus:
-      if (mem_ref->scaled == tic6x_offset_none)
+      if (mem_ref->scaled == tic6x_offset_none) {
         return;
+      }
       break;
 
     case tic6x_mem_mod_preinc:
@@ -2448,7 +2390,7 @@ tic6x_default_mem_ref (tic6x_mem_ref *mem_ref)
       break;
 
     default:
-      break;
+      return;
     }
 }
 
@@ -2458,20 +2400,27 @@ tic6x_default_mem_ref (tic6x_mem_ref *mem_ref)
 static unsigned int
 tic6x_encode_spmask (tic6x_func_unit_base unit, unsigned int side)
 {
-  static const int shift_offsets[] = {-1, 1, 3, 5};
-  
-  if (unit < tic6x_func_unit_l || unit > tic6x_func_unit_m || side == 0)
-    return 0;
-  
-  int index = unit - tic6x_func_unit_l;
-  if (index < 0 || index >= sizeof(shift_offsets) / sizeof(shift_offsets[0]))
-    return 0;
-  
-  int shift = side + shift_offsets[index];
-  if (shift < 0 || shift >= 32)
-    return 0;
-  
-  return 1U << shift;
+  if (side < 1 || side > 2) {
+    abort();
+  }
+
+  switch (unit)
+    {
+    case tic6x_func_unit_l:
+      return 1U << (side - 1);
+
+    case tic6x_func_unit_s:
+      return 1U << (side + 1);
+
+    case tic6x_func_unit_d:
+      return 1U << (side + 3);
+
+    case tic6x_func_unit_m:
+      return 1U << (side + 5);
+
+    default:
+      abort();
+    }
 }
 
 /* Try to encode the instruction with opcode number ID and operands
@@ -2502,47 +2451,58 @@ tic6x_try_encode (tic6x_opcode_id id, tic6x_operand *operands,
   const tic6x_opcode *opct;
   const tic6x_insn_format *fmt;
   unsigned int opcode_value;
+  unsigned int fld;
+
+  *ok = false;
 
   opct = &tic6x_opcode_table[id];
   fmt = &tic6x_insn_format_table[opct->format];
   opcode_value = fmt->cst_bits;
 
-  for (unsigned int fld = 0; fld < opct->num_fixed_fields; fld++)
+  for (fld = 0; fld < opct->num_fixed_fields; fld++)
     {
       if (opct->fixed_fields[fld].min_val == opct->fixed_fields[fld].max_val)
 	{
-	  const tic6x_insn_field *fldd = tic6x_field_from_fmt (fmt, opct->fixed_fields[fld].field_id);
+	  const tic6x_insn_field *fldd;
+	  fldd = tic6x_field_from_fmt (fmt, opct->fixed_fields[fld].field_id);
 	  if (fldd == NULL)
-	    abort ();
+	    return 0;
 	  opcode_value |= opct->fixed_fields[fld].min_val << fldd->bitfields[0].low_pos;
 	}
     }
 
-  for (unsigned int fld = 0; fld < opct->num_variable_fields; fld++)
+  for (fld = 0; fld < opct->num_variable_fields; fld++)
     {
-      const tic6x_insn_field *fldd = tic6x_field_from_fmt (fmt, opct->variable_fields[fld].field_id);
-      if (fldd == NULL)
-	abort ();
-      
-      unsigned int opno = opct->variable_fields[fld].operand_num;
-      unsigned int value = 0;
-      
-      if (!tic6x_encode_field_value(opct, fld, operands, opno, num_operands,
-				     fldd, sploop_ii, fix_exp, fix_pcrel,
-				     fx_r_type, fix_adda, fix_needed,
-				     &value, ok, print_errors, str, opc_len))
-	return 0;
+      const tic6x_insn_field *fldd;
+      unsigned int value;
+      unsigned int opno;
+      unsigned int ffld;
+      offsetT sign_value;
+      unsigned int bits;
+      unsigned int fcyc_bits;
+      expressionS *expp;
+      expressionS ucexp;
+      tic6x_mem_ref mem;
 
-      for (unsigned int ffld = 0; ffld < opct->num_fixed_fields; ffld++)
+      fldd = tic6x_field_from_fmt (fmt, opct->variable_fields[fld].field_id);
+      if (fldd == NULL)
+	return 0;
+      opno = opct->variable_fields[fld].operand_num;
+
+      if (!encode_variable_field(opct, &opct->variable_fields[fld], &operands[opno], 
+                                 fldd, opno, sploop_ii, func_unit_side, func_unit_cross,
+                                 func_unit_data_side, num_operands, operands,
+                                 &value, fix_needed, fix_exp, fix_pcrel, fx_r_type, 
+                                 fix_adda, print_errors, str, opc_len))
+        return 0;
+
+      for (ffld = 0; ffld < opct->num_fixed_fields; ffld++)
 	{
-	  if (opct->fixed_fields[ffld].field_id == opct->variable_fields[fld].field_id
-	      && (value < opct->fixed_fields[ffld].min_val
-		  || value > opct->fixed_fields[ffld].max_val))
+	  if ((opct->fixed_fields[ffld].field_id == opct->variable_fields[fld].field_id)
+	      && (value < opct->fixed_fields[ffld].min_val || value > opct->fixed_fields[ffld].max_val))
 	    {
 	      if (print_errors)
-		as_bad (_("operand %u of '%.*s' out of range"), opno + 1,
-			opc_len, str);
-	      *ok = false;
+		as_bad (_("operand %u of '%.*s' out of range"), opno + 1, opc_len, str);
 	      return 0;
 	    }
 	}
@@ -2552,19 +2512,19 @@ tic6x_try_encode (tic6x_opcode_id id, tic6x_operand *operands,
 
   if (this_line_creg)
     {
-      const tic6x_insn_field *creg = tic6x_field_from_fmt (fmt, tic6x_field_creg);
+      const tic6x_insn_field *creg;
+      const tic6x_insn_field *z;
+
+      creg = tic6x_field_from_fmt (fmt, tic6x_field_creg);
       if (creg == NULL)
 	{
 	  if (print_errors)
-	    as_bad (_("instruction '%.*s' cannot be predicated"),
-		    opc_len, str);
-	  *ok = false;
+	    as_bad (_("instruction '%.*s' cannot be predicated"), opc_len, str);
 	  return 0;
 	}
-      
-      const tic6x_insn_field *z = tic6x_field_from_fmt (fmt, tic6x_field_z);
+      z = tic6x_field_from_fmt (fmt, tic6x_field_z);
       if (z == NULL)
-	abort ();
+	return 0;
 
       opcode_value |= this_line_creg << creg->bitfields[0].low_pos;
       opcode_value |= this_line_z << z->bitfields[0].low_pos;
@@ -2575,147 +2535,129 @@ tic6x_try_encode (tic6x_opcode_id id, tic6x_operand *operands,
 }
 
 static bool
-tic6x_encode_field_value(const tic6x_opcode *opct, unsigned int fld,
-			 tic6x_operand *operands, unsigned int opno,
-			 unsigned int num_operands,
-			 const tic6x_insn_field *fldd, int sploop_ii,
-			 expressionS **fix_exp, int *fix_pcrel,
-			 bfd_reloc_code_real_type *fx_r_type, bool *fix_adda,
-			 bool *fix_needed, unsigned int *value,
-			 bool *ok, bool print_errors, char *str, int opc_len)
+encode_variable_field(const tic6x_opcode *opct, const tic6x_opcode_variable_field *var_field,
+                      tic6x_operand *operand, const tic6x_insn_field *fldd, 
+                      unsigned int opno, int sploop_ii, unsigned int func_unit_side,
+                      unsigned int func_unit_cross, unsigned int func_unit_data_side,
+                      unsigned int num_operands, tic6x_operand *operands,
+                      unsigned int *value, bool *fix_needed, expressionS **fix_exp,
+                      int *fix_pcrel, bfd_reloc_code_real_type *fx_r_type,
+                      bool *fix_adda, bool print_errors, char *str, int opc_len)
 {
-  switch (opct->variable_fields[fld].coding_method)
+  offsetT sign_value;
+  unsigned int bits;
+  unsigned int fcyc_bits;
+  expressionS *expp;
+  expressionS ucexp;
+  tic6x_mem_ref mem;
+
+  switch (var_field->coding_method)
     {
     case tic6x_coding_ucst:
-      return tic6x_encode_ucst(operands, opno, fldd, value, ok, print_errors, str, opc_len);
-      
+      if (operand->form != TIC6X_OP_EXP || operand->value.exp.X_op != O_constant)
+	return false;
+      ucexp = operand->value.exp;
+      return encode_unsigned_constant(ucexp, fldd, opno, value, print_errors, str, opc_len);
+
     case tic6x_coding_scst:
-      return tic6x_encode_scst(operands, opno, fldd, fix_needed, fix_exp,
-			       fix_pcrel, fx_r_type, fix_adda, value, ok,
-			       print_errors, str, opc_len);
-      
+      return encode_signed_constant(operand, fldd, opno, value, fix_needed, fix_exp,
+                                    fix_pcrel, fx_r_type, fix_adda, print_errors, str, opc_len);
+
     case tic6x_coding_ucst_minus_one:
-      return tic6x_encode_ucst_minus_one(operands, opno, fldd, value, ok,
-					 print_errors, str, opc_len);
-      
+      return encode_ucst_minus_one(operand, fldd, opno, value, print_errors, str, opc_len);
+
     case tic6x_coding_scst_negate:
-      return tic6x_encode_scst_negate(operands, opno, fldd, value, ok,
-				      print_errors, str, opc_len);
-      
+      return encode_scst_negate(operand, fldd, opno, value, print_errors, str, opc_len);
+
     case tic6x_coding_ulcst_dpr_byte:
     case tic6x_coding_ulcst_dpr_half:
     case tic6x_coding_ulcst_dpr_word:
-      return tic6x_encode_ulcst_dpr(opct, fld, operands, opno, fldd,
-				    fix_needed, fix_exp, fix_pcrel,
-				    fx_r_type, fix_adda, value, ok,
-				    print_errors, str, opc_len);
-      
+      return encode_dpr_operand(operand, var_field->coding_method, fldd, opno, value,
+                                fix_needed, fix_exp, fix_pcrel, fx_r_type, fix_adda,
+                                print_errors, str, opc_len);
+
     case tic6x_coding_lcst_low16:
-      return tic6x_encode_lcst_low16(operands, opno, fldd, fix_needed,
-				     fix_exp, fix_pcrel, fx_r_type,
-				     fix_adda, value);
-      
+      return encode_lcst_low16(operand, fldd, value, fix_needed, fix_exp, fix_pcrel, fx_r_type, fix_adda);
+
     case tic6x_coding_lcst_high16:
-      return tic6x_encode_lcst_high16(operands, opno, fldd, fix_needed,
-				      fix_exp, fix_pcrel, fx_r_type,
-				      fix_adda, value);
-      
+      return encode_lcst_high16(operand, fldd, value, fix_needed, fix_exp, fix_pcrel, fx_r_type, fix_adda);
+
     case tic6x_coding_pcrel:
     case tic6x_coding_pcrel_half:
-      return tic6x_encode_pcrel(operands, opno, fldd, fix_needed, fix_exp,
-			       fix_pcrel, fx_r_type, fix_adda, value);
-      
+      return encode_pcrel(operand, fldd, value, fix_needed, fix_exp, fix_pcrel, fx_r_type, fix_adda);
+
     case tic6x_coding_regpair_lsb:
-      *value = (operands[opno].form == TIC6X_OP_REGPAIR) ?
-	       operands[opno].value.reg.num : 0;
-      return true;
-      
+      return encode_regpair_lsb(operand, value);
+
     case tic6x_coding_regpair_msb:
-      *value = (operands[opno].form == TIC6X_OP_REGPAIR) ?
-	       operands[opno].value.reg.num + 1 : 0;
-      return true;
-      
+      return encode_regpair_msb(operand, value);
+
     case tic6x_coding_reg:
-      return tic6x_encode_reg(operands, opno, value);
-      
+      return encode_reg(operand, value);
+
     case tic6x_coding_areg:
-      return tic6x_encode_areg(operands, opno, value);
-      
+      return encode_areg(operand, value);
+
     case tic6x_coding_crlo:
-      *value = (operands[opno].form == TIC6X_OP_CTRL) ?
-	       tic6x_ctrl_table[operands[opno].value.ctrl].crlo : 0;
-      return true;
-      
+      return encode_crlo(operand, value);
+
     case tic6x_coding_crhi:
       *value = 0;
-      return true;
-      
+      return operand->form == TIC6X_OP_CTRL;
+
     case tic6x_coding_reg_shift:
-      *value = (operands[opno].form == TIC6X_OP_REGPAIR) ?
-	       operands[opno].value.reg.num >> 1 : 0;
-      return true;
-      
+      return encode_reg_shift(operand, value);
+
     case tic6x_coding_mem_offset:
-      return tic6x_encode_mem_offset(opct, operands, opno, fldd, value,
-				     ok, print_errors, str, opc_len);
-      
+      return encode_mem_offset(operand, opct, opno, fldd, value, print_errors, str, opc_len);
+
     case tic6x_coding_mem_offset_noscale:
-      return tic6x_encode_mem_offset_noscale(operands, opno, fldd, value,
-					     ok, print_errors, str, opc_len);
-      
+      return encode_mem_offset_noscale(operand, fldd, opno, value, print_errors, str, opc_len);
+
     case tic6x_coding_mem_mode:
-      return tic6x_encode_mem_mode(operands, opno, value);
-      
+      return encode_mem_mode(operand, value);
+
     case tic6x_coding_scaled:
-      return tic6x_encode_scaled(operands, opno, value);
-      
+      return encode_scaled(operand, value);
+
     case tic6x_coding_spmask:
-      return tic6x_encode_spmask(operands, num_operands, fldd, value,
-				 ok, print_errors, str, opc_len);
-      
+      return encode_spmask(num_operands, operands, fldd, value, print_errors, str, opc_len);
+
     case tic6x_coding_reg_unused:
       *value = 0;
       return true;
-      
+
     case tic6x_coding_fstg:
     case tic6x_coding_fcyc:
-      return tic6x_encode_fstg_fcyc(opct, fld, operands, opno, fldd,
-				    sploop_ii, value, ok, print_errors,
-				    str, opc_len);
-      
+      return encode_fstg_fcyc(operand, var_field->coding_method, fldd, opno, sploop_ii,
+                              value, print_errors, str, opc_len);
+
     case tic6x_coding_fu:
-      *value = (func_unit_side == 2) ? 1 : 0;
+      *value = func_unit_side == 2 ? 1 : 0;
       return true;
-      
+
     case tic6x_coding_data_fu:
-      *value = (func_unit_data_side == 2) ? 1 : 0;
+      *value = func_unit_data_side == 2 ? 1 : 0;
       return true;
-      
+
     case tic6x_coding_xpath:
       *value = func_unit_cross;
       return true;
-      
+
     default:
-      abort();
+      return false;
     }
 }
 
 static bool
-tic6x_encode_ucst(tic6x_operand *operands, unsigned int opno,
-		  const tic6x_insn_field *fldd, unsigned int *value,
-		  bool *ok, bool print_errors, char *str, int opc_len)
+encode_unsigned_constant(expressionS ucexp, const tic6x_insn_field *fldd,
+                        unsigned int opno, unsigned int *value,
+                        bool print_errors, char *str, int opc_len)
 {
-  if (operands[opno].form != TIC6X_OP_EXP)
-    abort();
-  if (operands[opno].value.exp.X_op != O_constant)
-    abort();
-    
-  expressionS ucexp = operands[opno].value.exp;
   if (ucexp.X_add_number < 0 || ucexp.X_add_number >= (1 << fldd->bitfields[0].width))
     {
       if (print_errors)
-	as_bad(_("operand %u of '%.*s' out of range"), opno + 1, opc_len, str);
-      *ok = false;
+        as_bad (_("operand %u of '%.*s' out of range"), opno + 1, opc_len, str);
       return false;
     }
   *value = ucexp.X_add_number;
@@ -2723,247 +2665,227 @@ tic6x_encode_ucst(tic6x_operand *operands, unsigned int opno,
 }
 
 static bool
-tic6x_encode_scst(tic6x_operand *operands, unsigned int opno,
-		  const tic6x_insn_field *fldd, bool *fix_needed,
-		  expressionS **fix_exp, int *fix_pcrel,
-		  bfd_reloc_code_real_type *fx_r_type, bool *fix_adda,
-		  unsigned int *value, bool *ok, bool print_errors,
-		  char *str, int opc_len)
+encode_signed_constant(tic6x_operand *operand, const tic6x_insn_field *fldd,
+                       unsigned int opno, unsigned int *value,
+                       bool *fix_needed, expressionS **fix_exp,
+                       int *fix_pcrel, bfd_reloc_code_real_type *fx_r_type,
+                       bool *fix_adda, bool print_errors, char *str, int opc_len)
 {
-  if (operands[opno].form != TIC6X_OP_EXP)
-    abort();
-    
-  if (operands[opno].value.exp.X_op != O_constant)
+  offsetT sign_value;
+
+  if (operand->form != TIC6X_OP_EXP)
+    return false;
+
+  if (operand->value.exp.X_op != O_constant)
     {
       *value = 0;
       if (fldd->bitfields[0].low_pos != 7 || fldd->bitfields[0].width != 16)
-	abort();
+        return false;
       *fix_needed = true;
-      *fix_exp = &operands[opno].value.exp;
+      *fix_exp = &operand->value.exp;
       *fix_pcrel = 0;
       *fx_r_type = BFD_RELOC_C6000_ABS_S16;
       *fix_adda = false;
       return true;
     }
-    
-  offsetT sign_value = SEXT(operands[opno].value.exp.X_add_number);
-  if (sign_value < -(1 << (fldd->bitfields[0].width - 1)) ||
-      sign_value >= (1 << (fldd->bitfields[0].width - 1)))
-    {
-      if (print_errors)
-	as_bad(_("operand %u of '%.*s' out of range"), opno + 1, opc_len, str);
-      *ok = false;
-      return false;
-    }
-  *value = sign_value + (1 << (fldd->bitfields[0].width - 1));
-  *value ^= (1 << (fldd->bitfields[0].width - 1));
-  return true;
-}
 
-static bool
-tic6x_encode_ucst_minus_one(tic6x_operand *operands, unsigned int opno,
-			    const tic6x_insn_field *fldd, unsigned int *value,
-			    bool *ok, bool print_errors, char *str, int opc_len)
-{
-  if (operands[opno].form != TIC6X_OP_EXP)
-    abort();
-  if (operands[opno].value.exp.X_op != O_constant)
-    abort();
-    
-  if (operands[opno].value.exp.X_add_number <= 0 ||
-      operands[opno].value.exp.X_add_number > (1 << fldd->bitfields[0].width))
-    {
-      if (print_errors)
-	as_bad(_("operand %u of '%.*s' out of range"), opno + 1, opc_len, str);
-      *ok = false;
-      return false;
-    }
-  *value = operands[opno].value.exp.X_add_number - 1;
-  return true;
-}
-
-static bool
-tic6x_encode_scst_negate(tic6x_operand *operands, unsigned int opno,
-			 const tic6x_insn_field *fldd, unsigned int *value,
-			 bool *ok, bool print_errors, char *str, int opc_len)
-{
-  if (operands[opno].form != TIC6X_OP_EXP)
-    abort();
-  if (operands[opno].value.exp.X_op != O_constant)
-    abort();
-    
-  offsetT sign_value = SEXT(-operands[opno].value.exp.X_add_number);
-  if (sign_value < -(1 << (fldd->bitfields[0].width - 1)) ||
-      sign_value >= (1 << (fldd->bitfields[0].width - 1)))
-    {
-      if (print_errors)
-	as_bad(_("operand %u of '%.*s' out of range"), opno + 1, opc_len, str);
-      *ok = false;
-      return false;
-    }
-  *value = sign_value + (1 << (fldd->bitfields[0].width - 1));
-  *value ^= (1 << (fldd->bitfields[0].width - 1));
-  return true;
-}
-
-static bool
-tic6x_encode_ulcst_dpr(const tic6x_opcode *opct, unsigned int fld,
-		       tic6x_operand *operands, unsigned int opno,
-		       const tic6x_insn_field *fldd, bool *fix_needed,
-		       expressionS **fix_exp, int *fix_pcrel,
-		       bfd_reloc_code_real_type *fx_r_type, bool *fix_adda,
-		       unsigned int *value, bool *ok, bool print_errors,
-		       char *str, int opc_len)
-{
-  unsigned int bits = tic6x_dpr_shift(opct->variable_fields[fld].coding_method);
-  expressionS *expp = NULL;
+  sign_value = SEXT (operand->value.exp.X_add_number);
   
-  if (operands[opno].form == TIC6X_OP_EXP)
+  if (sign_value < -(1 << (fldd->bitfields[0].width - 1)) ||
+      sign_value >= (1 << (fldd->bitfields[0].width - 1)))
     {
-      if (operands[opno].value.exp.X_op == O_constant)
-	{
-	  expressionS ucexp = operands[opno].value.exp;
-	  if (ucexp.X_add_number < 0 || ucexp.X_add_number >= (1 << fldd->bitfields[0].width))
-	    {
-	      if (print_errors)
-		as_bad(_("operand %u of '%.*s' out of range"), opno + 1, opc_len, str);
-	      *ok = false;
-	      return false;
-	    }
-	  *value = ucexp.X_add_number;
-	  return true;
-	}
-      expp = &operands[opno].value.exp;
-      *fix_adda = true;
+      if (print_errors)
+        as_bad (_("operand %u of '%.*s' out of range"), opno + 1, opc_len, str);
+      return false;
     }
-  else if (operands[opno].form == TIC6X_OP_MEM_NOUNREG)
+  
+  *value = sign_value + (1 << (fldd->bitfields[0].width - 1));
+  *value ^= (1 << (fldd->bitfields[0].width - 1));
+  return true;
+}
+
+static bool
+encode_ucst_minus_one(tic6x_operand *operand, const tic6x_insn_field *fldd,
+                      unsigned int opno, unsigned int *value,
+                      bool print_errors, char *str, int opc_len)
+{
+  if (operand->form != TIC6X_OP_EXP || operand->value.exp.X_op != O_constant)
+    return false;
+
+  if (operand->value.exp.X_add_number <= 0 ||
+      operand->value.exp.X_add_number > (1 << fldd->bitfields[0].width))
     {
-      tic6x_mem_ref mem = operands[opno].value.mem;
-      tic6x_default_mem_ref(&mem);
+      if (print_errors)
+        as_bad (_("operand %u of '%.*s' out of range"), opno + 1, opc_len, str);
+      return false;
+    }
+  
+  *value = operand->value.exp.X_add_number - 1;
+  return true;
+}
+
+static bool
+encode_scst_negate(tic6x_operand *operand, const tic6x_insn_field *fldd,
+                   unsigned int opno, unsigned int *value,
+                   bool print_errors, char *str, int opc_len)
+{
+  offsetT sign_value;
+
+  if (operand->form != TIC6X_OP_EXP || operand->value.exp.X_op != O_constant)
+    return false;
+
+  sign_value = SEXT (-operand->value.exp.X_add_number);
+  
+  if (sign_value < -(1 << (fldd->bitfields[0].width - 1)) ||
+      sign_value >= (1 << (fldd->bitfields[0].width - 1)))
+    {
+      if (print_errors)
+        as_bad (_("operand %u of '%.*s' out of range"), opno + 1, opc_len, str);
+      return false;
+    }
+  
+  *value = sign_value + (1 << (fldd->bitfields[0].width - 1));
+  *value ^= (1 << (fldd->bitfields[0].width - 1));
+  return true;
+}
+
+static bool
+encode_dpr_operand(tic6x_operand *operand, tic6x_coding_method coding_method,
+                   const tic6x_insn_field *fldd, unsigned int opno,
+                   unsigned int *value, bool *fix_needed, expressionS **fix_exp,
+                   int *fix_pcrel, bfd_reloc_code_real_type *fx_r_type,
+                   bool *fix_adda, bool print_errors, char *str, int opc_len)
+{
+  unsigned int bits = tic6x_dpr_shift (coding_method);
+  expressionS *expp;
+  expressionS ucexp;
+  tic6x_mem_ref mem;
+
+  switch (operand->form)
+    {
+    case TIC6X_OP_EXP:
+      if (operand->value.exp.X_op == O_constant)
+        {
+          ucexp = operand->value.exp;
+          return encode_unsigned_constant(ucexp, fldd, opno, value, print_errors, str, opc_len);
+        }
+      expp = &operand->value.exp;
+      break;
+
+    case TIC6X_OP_MEM_NOUNREG:
+      mem = operand->value.mem;
+      tic6x_default_mem_ref (&mem);
       if (mem.offset_is_reg)
-	abort();
-	
-      if (mem.offset.exp.X_op == O_constant)
-	{
-	  expressionS ucexp = mem.offset.exp;
-	  if (mem.scaled == tic6x_offset_unscaled)
-	    {
-	      if (ucexp.X_add_number & ((1 << bits) - 1))
-		{
-		  if (print_errors)
-		    as_bad(_("offset in operand %u of '%.*s' not divisible by %u"),
-			   opno + 1, opc_len, str, 1u << bits);
-		  *ok = false;
-		  return false;
-		}
-	      ucexp.X_add_number >>= bits;
-	    }
-	  if (ucexp.X_add_number < 0 || ucexp.X_add_number >= (1 << fldd->bitfields[0].width))
-	    {
-	      if (print_errors)
-		as_bad(_("operand %u of '%.*s' out of range"), opno + 1, opc_len, str);
-	      *ok = false;
-	      return false;
-	    }
-	  *value = ucexp.X_add_number;
-	  return true;
-	}
+        return false;
       
-      if (mem.scaled != tic6x_offset_unscaled)
-	abort();
-      if (operands[opno].value.mem.mod == tic6x_mem_mod_none ||
-	  operands[opno].value.mem.scaled != tic6x_offset_unscaled ||
-	  operands[opno].value.mem.offset_is_reg)
-	abort();
-	
-      expp = &operands[opno].value.mem.offset.exp;
-      *fix_adda = false;
+      if (mem.offset.exp.X_op == O_constant)
+        {
+          ucexp = mem.offset.exp;
+          if (mem.scaled == tic6x_offset_unscaled)
+            {
+              if (ucexp.X_add_number & ((1 << bits) - 1))
+                {
+                  if (print_errors)
+                    as_bad (_("offset in operand %u of '%.*s' not divisible by %u"),
+                            opno + 1, opc_len, str, 1u << bits);
+                  return false;
+                }
+              ucexp.X_add_number >>= bits;
+            }
+          return encode_unsigned_constant(ucexp, fldd, opno, value, print_errors, str, opc_len);
+        }
+      
+      if (mem.scaled != tic6x_offset_unscaled ||
+          operand->value.mem.mod != tic6x_mem_mod_none ||
+          operand->value.mem.scaled != tic6x_offset_unscaled ||
+          operand->value.mem.offset_is_reg)
+        return false;
+      
+      expp = &operand->value.mem.offset.exp;
+      break;
+
+    default:
+      return false;
     }
-  else
-    abort();
-    
+
   *value = 0;
   if (fldd->bitfields[0].low_pos != 8 || fldd->bitfields[0].width != 15)
-    abort();
-    
+    return false;
+  
   *fix_needed = true;
   *fix_exp = expp;
   *fix_pcrel = 0;
-  *fx_r_type = tic6x_dpr_reloc(opct->variable_fields[fld].coding_method);
+  *fx_r_type = tic6x_dpr_reloc (coding_method);
+  *fix_adda = (operand->form == TIC6X_OP_EXP);
   return true;
 }
 
 static bool
-tic6x_encode_lcst_low16(tic6x_operand *operands, unsigned int opno,
-		        const tic6x_insn_field *fldd, bool *fix_needed,
-		        expressionS **fix_exp, int *fix_pcrel,
-		        bfd_reloc_code_real_type *fx_r_type, bool *fix_adda,
-		        unsigned int *value)
+encode_lcst_low16(tic6x_operand *operand, const tic6x_insn_field *fldd,
+                  unsigned int *value, bool *fix_needed, expressionS **fix_exp,
+                  int *fix_pcrel, bfd_reloc_code_real_type *fx_r_type, bool *fix_adda)
 {
-  if (operands[opno].form != TIC6X_OP_EXP)
-    abort();
-    
-  if (operands[opno].value.exp.X_op == O_constant)
+  if (operand->form != TIC6X_OP_EXP)
+    return false;
+
+  if (operand->value.exp.X_op == O_constant)
     {
-      *value = operands[opno].value.exp.X_add_number & 0xffff;
+      *value = operand->value.exp.X_add_number & 0xffff;
+      return true;
     }
-  else
-    {
-      *value = 0;
-      if (fldd->bitfields[0].low_pos != 7 || fldd->bitfields[0].width != 16)
-	abort();
-      *fix_needed = true;
-      *fix_exp = &operands[opno].value.exp;
-      *fix_pcrel = 0;
-      *fx_r_type = BFD_RELOC_C6000_ABS_L16;
-      *fix_adda = false;
-    }
+  
+  *value = 0;
+  if (fldd->bitfields[0].low_pos != 7 || fldd->bitfields[0].width != 16)
+    return false;
+  
+  *fix_needed = true;
+  *fix_exp = &operand->value.exp;
+  *fix_pcrel = 0;
+  *fx_r_type = BFD_RELOC_C6000_ABS_L16;
+  *fix_adda = false;
   return true;
 }
 
 static bool
-tic6x_encode_lcst_high16(tic6x_operand *operands, unsigned int opno,
-			 const tic6x_insn_field *fldd, bool *fix_needed,
-			 expressionS **fix_exp, int *fix_pcrel,
-			 bfd_reloc_code_real_type *fx_r_type, bool *fix_adda,
-			 unsigned int *value)
+encode_lcst_high16(tic6x_operand *operand, const tic6x_insn_field *fldd,
+                   unsigned int *value, bool *fix_needed, expressionS **fix_exp,
+                   int *fix_pcrel, bfd_reloc_code_real_type *fx_r_type, bool *fix_adda)
 {
-  if (operands[opno].form != TIC6X_OP_EXP)
-    abort();
-    
-  if (operands[opno].value.exp.X_op == O_constant)
+  if (operand->form != TIC6X_OP_EXP)
+    return false;
+
+  if (operand->value.exp.X_op == O_constant)
     {
-      *value = (operands[opno].value.exp.X_add_number >> 16) & 0xffff;
+      *value = (operand->value.exp.X_add_number >> 16) & 0xffff;
+      return true;
     }
-  else
-    {
-      *value = 0;
-      if (fldd->bitfields[0].low_pos != 7 || fldd->bitfields[0].width != 16)
-	abort();
-      *fix_needed = true;
-      *fix_exp = &operands[opno].value.exp;
-      *fix_pcrel = 0;
-      *fx_r_type = BFD_RELOC_C6000_ABS_H16;
-      *fix_adda = false;
-    }
+  
+  *value = 0;
+  if (fldd->bitfields[0].low_pos != 7 || fldd->bitfields[0].width != 16)
+    return false;
+  
+  *fix_needed = true;
+  *fix_exp = &operand->value.exp;
+  *fix_pcrel = 0;
+  *fx_r_type = BFD_RELOC_C6000_ABS_H16;
+  *fix_adda = false;
   return true;
 }
 
 static bool
-tic6x_encode_pcrel(tic6x_operand *operands, unsigned int opno,
-		   const tic6x_insn_field *fldd, bool *fix_needed,
-		   expressionS **fix_exp, int *fix_pcrel,
-		   bfd_reloc_code_real_type *fx_r_type, bool *fix_adda,
-		   unsigned int *value)
+encode_pcrel(tic6x_operand *operand, const tic6x_insn_field *fldd,
+             unsigned int *value, bool *fix_needed, expressionS **fix_exp,
+             int *fix_pcrel, bfd_reloc_code_real_type *fx_r_type, bool *fix_adda)
 {
-  if (operands[opno].form != TIC6X_OP_EXP)
-    abort();
-    
+  if (operand->form != TIC6X_OP_EXP)
+    return false;
+
   *value = 0;
   *fix_needed = true;
-  *fix_exp = &operands[opno].value.exp;
+  *fix_exp = &operand->value.exp;
   *fix_pcrel = 1;
-  
+  *fix_adda = false;
+
   if (fldd->bitfields[0].low_pos == 7 && fldd->bitfields[0].width == 21)
     *fx_r_type = BFD_RELOC_C6000_PCR_S21;
   else if (fldd->bitfields[0].low_pos == 16 && fldd->bitfields[0].width == 12)
@@ -2973,154 +2895,190 @@ tic6x_encode_pcrel(tic6x_operand *operands, unsigned int opno,
   else if (fldd->bitfields[0].low_pos == 16 && fldd->bitfields[0].width == 7)
     *fx_r_type = BFD_RELOC_C6000_PCR_S7;
   else
-    abort();
-    
-  *fix_adda = false;
+    return false;
+
   return true;
 }
 
 static bool
-tic6x_encode_reg(tic6x_operand *operands, unsigned int opno, unsigned int *value)
+encode_regpair_lsb(tic6x_operand *operand, unsigned int *value)
 {
-  switch (operands[opno].form)
+  if (operand->form != TIC6X_OP_REGPAIR)
+    return false;
+  *value = operand->value.reg.num;
+  return true;
+}
+
+static bool
+encode_regpair_msb(tic6x_operand *operand, unsigned int *value)
+{
+  if (operand->form != TIC6X_OP_REGPAIR)
+    return false;
+  *value = operand->value.reg.num + 1;
+  return true;
+}
+
+static bool
+encode_reg(tic6x_operand *operand, unsigned int *value)
+{
+  switch (operand->form)
     {
     case TIC6X_OP_REG:
     case TIC6X_OP_REGPAIR:
-      *value = operands[opno].value.reg.num;
-      break;
+      *value = operand->value.reg.num;
+      return true;
+
     case TIC6X_OP_MEM_NOUNREG:
     case TIC6X_OP_MEM_UNREG:
-      *value = operands[opno].value.mem.base_reg.num;
-      break;
+      *value = operand->value.mem.base_reg.num;
+      return true;
+
     default:
-      abort();
+      return false;
     }
-  return true;
 }
 
 static bool
-tic6x_encode_areg(tic6x_operand *operands, unsigned int opno, unsigned int *value)
+encode_areg(tic6x_operand *operand, unsigned int *value)
 {
-  switch (operands[opno].form)
+  switch (operand->form)
     {
     case TIC6X_OP_REG:
-      *value = (operands[opno].value.reg.num == 15) ? 1 : 0;
-      break;
+      *value = (operand->value.reg.num == 15 ? 1 : 0);
+      return true;
+
     case TIC6X_OP_MEM_NOUNREG:
-      *value = (operands[opno].value.mem.base_reg.num == 15) ? 1 : 0;
-      break;
+      *value = (operand->value.mem.base_reg.num == 15 ? 1 : 0);
+      return true;
+
     default:
-      abort();
+      return false;
     }
+}
+
+static bool
+encode_crlo(tic6x_operand *operand, unsigned int *value)
+{
+  if (operand->form != TIC6X_OP_CTRL)
+    return false;
+  *value = tic6x_ctrl_table[operand->value.ctrl].crlo;
   return true;
 }
 
 static bool
-tic6x_encode_mem_offset(const tic6x_opcode *opct, tic6x_operand *operands,
-		        unsigned int opno, const tic6x_insn_field *fldd,
-		        unsigned int *value, bool *ok, bool print_errors,
-		        char *str, int opc_len)
+encode_reg_shift(tic6x_operand *operand, unsigned int *value)
 {
-  if (operands[opno].form != TIC6X_OP_MEM_NOUNREG)
-    abort();
-    
-  tic6x_mem_ref mem = operands[opno].value.mem;
-  tic6x_default_mem_ref(&mem);
+  if (operand->form != TIC6X_OP_REGPAIR)
+    return false;
+  *value = operand->value.reg.num >> 1;
+  return true;
+}
+
+static bool
+encode_mem_offset(tic6x_operand *operand, const tic6x_opcode *opct,
+                  unsigned int opno, const tic6x_insn_field *fldd,
+                  unsigned int *value, bool print_errors, char *str, int opc_len)
+{
+  tic6x_mem_ref mem;
+  int scale;
+
+  if (operand->form != TIC6X_OP_MEM_NOUNREG)
+    return false;
+
+  mem = operand->value.mem;
+  tic6x_default_mem_ref (&mem);
   
   if (mem.offset_is_reg)
     {
       if (mem.scaled != tic6x_offset_scaled)
-	abort();
+        return false;
       *value = mem.offset.reg.num;
+      return true;
     }
-  else
+
+  if (mem.offset.exp.X_op != O_constant)
+    return false;
+
+  switch (mem.scaled)
     {
-      if (mem.offset.exp.X_op != O_constant)
-	abort();
-	
-      int scale;
-      switch (mem.scaled)
-	{
-	case tic6x_offset_scaled:
-	  scale = 1;
-	  break;
-	case tic6x_offset_unscaled:
-	  scale = opct->operand_info[opno].size;
-	  if (scale != 1 && scale != 2 && scale != 4 && scale != 8)
-	    abort();
-	  break;
-	default:
-	  abort();
-	}
-      
-      if (mem.offset.exp.X_add_number < 0 ||
-	  mem.offset.exp.X_add_number >= (1 << fldd->bitfields[0].width) * scale)
-	{
-	  if (print_errors)
-	    as_bad(_("offset in operand %u of '%.*s' out of range"),
-		   opno + 1, opc_len, str);
-	  *ok = false;
-	  return false;
-	}
-      
-      if (mem.offset.exp.X_add_number % scale)
-	{
-	  if (print_errors)
-	    as_bad(_("offset in operand %u of '%.*s' not divisible by %u"),
-		   opno + 1, opc_len, str, scale);
-	  *ok = false;
-	  return false;
-	}
-      
-      *value = mem.offset.exp.X_add_number / scale;
+    case tic6x_offset_scaled:
+      scale = 1;
+      break;
+
+    case tic6x_offset_unscaled:
+      scale = opct->operand_info[opno].size;
+      if (scale != 1 && scale != 2 && scale != 4 && scale != 8)
+        return false;
+      break;
+
+    default:
+      return false;
     }
+
+  if (mem.offset.exp.X_add_number < 0 ||
+      mem.offset.exp.X_add_number >= (1 << fldd->bitfields[0].width) * scale)
+    {
+      if (print_errors)
+        as_bad (_("offset in operand %u of '%.*s' out of range"), opno + 1, opc_len, str);
+      return false;
+    }
+
+  if (mem.offset.exp.X_add_number % scale)
+    {
+      if (print_errors)
+        as_bad (_("offset in operand %u of '%.*s' not divisible by %u"),
+                opno + 1, opc_len, str, scale);
+      return false;
+    }
+
+  *value = mem.offset.exp.X_add_number / scale;
   return true;
 }
 
 static bool
-tic6x_encode_mem_offset_noscale(tic6x_operand *operands, unsigned int opno,
-			         const tic6x_insn_field *fldd, unsigned int *value,
-			         bool *ok, bool print_errors, char *str, int opc_len)
+encode_mem_offset_noscale(tic6x_operand *operand, const tic6x_insn_field *fldd,
+                          unsigned int opno, unsigned int *value,
+                          bool print_errors, char *str, int opc_len)
 {
-  if (operands[opno].form != TIC6X_OP_MEM_UNREG)
-    abort();
-    
-  tic6x_mem_ref mem = operands[opno].value.mem;
-  tic6x_default_mem_ref(&mem);
+  tic6x_mem_ref mem;
+
+  if (operand->form != TIC6X_OP_MEM_UNREG)
+    return false;
+
+  mem = operand->value.mem;
+  tic6x_default_mem_ref (&mem);
   
   if (mem.offset_is_reg)
     {
       *value = mem.offset.reg.num;
+      return true;
     }
-  else
+
+  if (mem.offset.exp.X_op != O_constant)
+    return false;
+
+  if (mem.offset.exp.X_add_number < 0 ||
+      mem.offset.exp.X_add_number >= (1 << fldd->bitfields[0].width))
     {
-      if (mem.offset.exp.X_op != O_constant)
-	abort();
-      
-      if (mem.offset.exp.X_add_number < 0 ||
-	  mem.offset.exp.X_add_number >= (1 << fldd->bitfields[0].width))
-	{
-	  if (print_errors)
-	    as_bad(_("offset in operand %u of '%.*s' out of range"),
-		   opno + 1, opc_len, str);
-	  *ok = false;
-	  return false;
-	}
-      
-      *value = mem.offset.exp.X_add_number;
+      if (print_errors)
+        as_bad (_("offset in operand %u of '%.*s' out of range"), opno + 1, opc_len, str);
+      return false;
     }
+
+  *value = mem.offset.exp.X_add_number;
   return true;
 }
 
 static bool
-tic6x_encode_mem_mode(tic6x_operand *operands, unsigned int opno, unsigned int *value)
+encode_mem_mode(tic6x_operand *operand, unsigned int *value)
 {
-  if (operands[opno].form != TIC6X_OP_MEM_NOUNREG &&
-      operands[opno].form != TIC6X_OP_MEM_UNREG)
-    abort();
-    
-  tic6x_mem_ref mem = operands[opno].value.mem;
-  tic6x_default_mem_ref(&mem);
+  tic6x_mem_ref mem;
+
+  if (operand->form != TIC6X_OP_MEM_NOUNREG && operand->form != TIC6X_OP_MEM_UNREG)
+    return false;
+
+  mem = operand->value.mem;
+  tic6x_default_mem_ref (&mem);
   
   switch (mem.mod)
     {
@@ -3143,7 +3101,7 @@ tic6x_encode_mem_mode(tic6x_operand *operands, unsigned int opno, unsigned int *
       *value = 10;
       break;
     default:
-      abort();
+      return false;
     }
   
   *value += (mem.offset_is_reg ? 4 : 0);
@@ -3151,12 +3109,64 @@ tic6x_encode_mem_mode(tic6x_operand *operands, unsigned int opno, unsigned int *
 }
 
 static bool
-tic6x_encode_scaled(tic6x_operand *operands, unsigned int opno, unsigned int *value)
+encode_scaled(tic6x_operand *operand, unsigned int *value)
 {
-  if (operands[opno].form != TIC6X_OP_MEM_UNREG)
-    abort();
-    
-  tic6x_mem_ref mem = operands[opno].
+  tic6x_mem_ref mem;
+
+  if (operand->form != TIC6X_OP_MEM_UNREG)
+    return false;
+
+  mem = operand->value.mem;
+  tic6x_default_mem_ref (&mem);
+  
+  switch (mem.scaled)
+    {
+    case tic6x_offset_unscaled:
+      *value = 0;
+      return true;
+    case tic6x_offset_scaled:
+      *value = 1;
+      return true;
+    default:
+      return false;
+    }
+}
+
+static bool
+encode_spmask(unsigned int num_operands, tic6x_operand *operands,
+              const tic6x_insn_field *fldd, unsigned int *value,
+              bool print_errors, char *str, int opc_len)
+{
+  unsigned int opno;
+
+  if (fldd->bitfields[0].low_pos != 18)
+    return false;
+
+  *value = 0;
+  for (opno = 0; opno < num_operands; opno++)
+    {
+      unsigned int v = tic6x_encode_spmask (operands[opno].value.func_unit.base,
+                                            operands[opno].value.func_unit.side);
+      if (*value & v)
+        {
+          if (print_errors)
+            as_bad (_("functional unit already masked for operand %u of '%.*s'"),
+                    opno + 1, opc_len, str);
+          return false;
+        }
+      *value |= v;
+    }
+  return true;
+}
+
+static bool
+encode_fstg_fcyc(tic6x_operand *operand, tic6x_coding_method coding_method,
+                 const tic6x_insn_field *fldd, unsigned int opno, int sploop_ii,
+                 unsigned int *value, bool print_errors, char *str, int opc_len)
+{
+  unsigned int fcyc_bits;
+
+  if (operand->form != TIC6X_
 
 /* Convert the target integer stored in N bytes in BUF to a host
    integer, returning that value.  */
@@ -3165,24 +3175,28 @@ static valueT
 md_chars_to_number (char *buf, int n)
 {
   valueT result = 0;
-  
+  int i;
+
   if (buf == NULL || n <= 0)
+    return 0;
+
+  if (target_big_endian)
     {
-      return 0;
+      for (i = 0; i < n; i++)
+        {
+          result <<= 8;
+          result |= ((unsigned char)buf[i] & 0xff);
+        }
     }
-  
-  if (n > sizeof(valueT))
+  else
     {
-      n = sizeof(valueT);
+      for (i = n - 1; i >= 0; i--)
+        {
+          result <<= 8;
+          result |= ((unsigned char)buf[i] & 0xff);
+        }
     }
-  
-  for (int i = 0; i < n; i++)
-    {
-      int index = target_big_endian ? i : (n - 1 - i);
-      result <<= 8;
-      result |= ((unsigned char)buf[index]);
-    }
-  
+
   return result;
 }
 
@@ -3193,6 +3207,7 @@ void
 md_assemble (char *str)
 {
   char *p;
+  int opc_len;
   bool this_line_parallel;
   bool this_line_spmask;
   unsigned int this_line_creg;
@@ -3226,17 +3241,18 @@ md_assemble (char *str)
   bool fix_adda = false;
   fragS *insn_frag;
   char *output;
-  int opc_len;
+
+  if (str == NULL) {
+    return;
+  }
 
   p = str;
   while (!is_end_of_stmt (*p) && !is_whitespace (*p))
     p++;
 
   if (p == str)
-    abort ();
+    return;
 
-  opc_len = p - str;
-  
   tic6x_seen_insns = true;
   if (tic6x_arch_attribute == C6XABI_Tag_ISA_none)
     tic6x_arch_attribute = C6XABI_Tag_ISA_C674X;
@@ -3253,7 +3269,7 @@ md_assemble (char *str)
   this_insn_label_list = seginfo->tc_segment_info_data.label_list;
   seginfo->tc_segment_info_data.label_list = NULL;
 
-  opc_list = str_hash_find_n (opcode_hash, str, opc_len);
+  opc_list = str_hash_find_n (opcode_hash, str, p - str);
   if (opc_list == NULL)
     {
       char c = *p;
@@ -3263,6 +3279,7 @@ md_assemble (char *str)
       return;
     }
 
+  opc_len = p - str;
   skip_whitespace (p);
 
   if (*p == '.')
@@ -3315,10 +3332,15 @@ md_assemble (char *str)
     max_matching_opcodes++;
   num_matching_opcodes = 0;
   opcm = XNEWVEC (tic6x_opcode_id, max_matching_opcodes);
+  if (opcm == NULL) {
+    as_bad (_("out of memory"));
+    return;
+  }
   max_num_operands = 0;
   ok_this_arch = false;
   ok_this_fu = false;
   ok_this_arch_fu = false;
+  
   for (opc = opc_list; opc; opc = opc->next)
     {
       unsigned int num_operands;
@@ -3366,7 +3388,10 @@ md_assemble (char *str)
 	  if (num_operands != 1
 	      || (tic6x_opcode_table[opc->id].operand_info[0].form
 		  != tic6x_operand_func_unit))
-	    abort ();
+	    {
+	      free (opcm);
+	      return;
+	    }
 	  num_operands = 8;
 	  for (i = 0; i < num_operands; i++)
 	    {
@@ -3415,8 +3440,10 @@ md_assemble (char *str)
       return;
     }
 
-  if (num_matching_opcodes == 0)
-    abort ();
+  if (num_matching_opcodes == 0) {
+    free (opcm);
+    return;
+  }
 
   num_operands_read = 0;
   while (true)
@@ -3459,7 +3486,10 @@ md_assemble (char *str)
 	  continue;
 	}
       else
-	abort ();
+	{
+	  free (opcm);
+	  return;
+	}
     }
 
   if (!bad_operands && !num_operands_permitted[num_operands_read])
@@ -3521,54 +3551,42 @@ md_assemble (char *str)
 		fine_failure = this_fine_failure;
 	    }
 
-	  if (!coarse_ok)
-	    abort ();
+	  if (!coarse_ok) {
+	    free (opcm);
+	    return;
+	  }
 
 	  if (!fine_ok)
 	    {
+	      const char *error_msg = NULL;
 	      switch (fine_failure)
 		{
 		case tic6x_match_non_const:
-		  as_bad (_("operand %u of '%.*s' not constant"),
-			  i + 1, opc_len, str);
+		  error_msg = _("operand %u of '%.*s' not constant");
 		  break;
-
 		case tic6x_match_wrong_side:
-		  as_bad (_("operand %u of '%.*s' on wrong side"),
-			  i + 1, opc_len, str);
+		  error_msg = _("operand %u of '%.*s' on wrong side");
 		  break;
-
 		case tic6x_match_bad_return:
-		  as_bad (_("operand %u of '%.*s' not a valid return "
-			    "address register"),
-			  i + 1, opc_len, str);
+		  error_msg = _("operand %u of '%.*s' not a valid return address register");
 		  break;
-
 		case tic6x_match_ctrl_write_only:
-		  as_bad (_("operand %u of '%.*s' is write-only"),
-			  i + 1, opc_len, str);
+		  error_msg = _("operand %u of '%.*s' is write-only");
 		  break;
-
 		case tic6x_match_ctrl_read_only:
-		  as_bad (_("operand %u of '%.*s' is read-only"),
-			  i + 1, opc_len, str);
+		  error_msg = _("operand %u of '%.*s' is read-only");
 		  break;
-
 		case tic6x_match_bad_mem:
-		  as_bad (_("operand %u of '%.*s' not a valid memory "
-			    "reference"),
-			  i + 1, opc_len, str);
+		  error_msg = _("operand %u of '%.*s' not a valid memory reference");
 		  break;
-
 		case tic6x_match_bad_address:
-		  as_bad (_("operand %u of '%.*s' not a valid base "
-			    "address register"),
-			  i + 1, opc_len, str);
+		  error_msg = _("operand %u of '%.*s' not a valid base address register");
 		  break;
-
 		default:
-		  abort ();
+		  free (opcm);
+		  return;
 		}
+	      as_bad (error_msg, i + 1, opc_len, str);
 	      bad_operands = true;
 	      break;
 	    }
@@ -3632,8 +3650,10 @@ md_assemble (char *str)
 
 	      if (opc_rank[rank] == -1u)
 		opc_rank[rank] = i;
-	      else
-		abort ();
+	      else {
+		free (opcm);
+		return;
+	      }
 
 	      found_match = true;
 	    }
@@ -3732,8 +3752,9 @@ md_assemble (char *str)
       tic6x_free_label_list (this_insn_label_list);
       dwarf2_emit_insn (0);
       output = frag_var (rs_machine_dependent, 32, 32, 0, NULL, 0, NULL);
-      if (output != insn_frag->fr_literal)
-	abort ();
+      if (output != insn_frag->fr_literal) {
+	return;
+      }
       insn_frag->tc_frag_data.is_insns = true;
       insn_frag->tc_frag_data.can_cross_fp_boundary
 	= tic6x_can_cross_fp_boundary;
@@ -3758,7 +3779,7 @@ md_assemble (char *str)
       if (num_operands_read != 1
 	  || operands[0].form != TIC6X_OP_EXP
 	  || operands[0].value.exp.X_op != O_constant)
-	abort ();
+	return;
       seginfo->tc_segment_info_data.sploop_ii
 	= operands[0].value.exp.X_add_number;
     }
@@ -3820,11 +3841,13 @@ md_assemble (char *str)
 void
 md_apply_fix (fixS *fixP, valueT *valP, segT seg ATTRIBUTE_UNUSED)
 {
-  valueT value = SEXT(*valP);
+  valueT value = *valP;
   char *buf = fixP->fx_where + fixP->fx_frag->fr_literal;
 
+  value = SEXT (value);
   *valP = value;
-  fixP->fx_offset = SEXT(fixP->fx_offset);
+
+  fixP->fx_offset = SEXT (fixP->fx_offset);
 
   if (fixP->fx_addsy == NULL && fixP->fx_pcrel == 0)
     fixP->fx_done = 1;
@@ -3841,16 +3864,16 @@ md_apply_fix (fixS *fixP, valueT *valP, segT seg ATTRIBUTE_UNUSED)
 
     case BFD_RELOC_32:
       if (fixP->fx_done || !seg->use_rela_p)
-        md_number_to_chars(buf, value, 4);
+        md_number_to_chars (buf, value, 4);
       break;
 
     case BFD_RELOC_16:
       if (fixP->fx_done || !seg->use_rela_p)
         {
           if (value + 0x8000 > 0xffff + 0x8000)
-            as_bad_where(fixP->fx_file, fixP->fx_line,
-                        _("value too large for 2-byte field"));
-          md_number_to_chars(buf, value, 2);
+            as_bad_where (fixP->fx_file, fixP->fx_line,
+                          _("value too large for 2-byte field"));
+          md_number_to_chars (buf, value, 2);
         }
       break;
 
@@ -3858,8 +3881,8 @@ md_apply_fix (fixS *fixP, valueT *valP, segT seg ATTRIBUTE_UNUSED)
       if (fixP->fx_done || !seg->use_rela_p)
         {
           if (value + 0x80 > 0xff + 0x80)
-            as_bad_where(fixP->fx_file, fixP->fx_line,
-                        _("value too large for 1-byte field"));
+            as_bad_where (fixP->fx_file, fixP->fx_line,
+                          _("value too large for 1-byte field"));
           *buf = value;
         }
       break;
@@ -3873,29 +3896,28 @@ md_apply_fix (fixS *fixP, valueT *valP, segT seg ATTRIBUTE_UNUSED)
     case BFD_RELOC_C6000_SBR_GOT_L16_W:
       if (fixP->fx_done || !seg->use_rela_p)
         {
-          valueT newval = md_chars_to_number(buf, 4);
+          valueT newval = md_chars_to_number (buf, 4);
           int shift = 0;
 
           if (fixP->fx_r_type == BFD_RELOC_C6000_SBR_L16_H)
             shift = 1;
-          else if (fixP->fx_r_type == BFD_RELOC_C6000_SBR_L16_W ||
+          else if (fixP->fx_r_type == BFD_RELOC_C6000_SBR_L16_W || 
                    fixP->fx_r_type == BFD_RELOC_C6000_SBR_GOT_L16_W)
             shift = 2;
 
-          MODIFY_VALUE(newval, value, shift, 7, 16);
-          
+          MODIFY_VALUE (newval, value, shift, 7, 16);
           if ((value + 0x8000 > 0x7fff + 0x8000) &&
               (fixP->fx_r_type == BFD_RELOC_C6000_ABS_S16 ||
                fixP->fx_r_type == BFD_RELOC_C6000_SBR_S16))
-            as_bad_where(fixP->fx_file, fixP->fx_line,
-                        _("immediate offset out of range"));
+            as_bad_where (fixP->fx_file, fixP->fx_line,
+                          _("immediate offset out of range"));
 
-          md_number_to_chars(buf, newval, 4);
+          md_number_to_chars (buf, newval, 4);
         }
       if (fixP->fx_done &&
           fixP->fx_r_type != BFD_RELOC_C6000_ABS_S16 &&
           fixP->fx_r_type != BFD_RELOC_C6000_ABS_L16)
-        abort();
+        abort ();
       break;
 
     case BFD_RELOC_C6000_ABS_H16:
@@ -3905,7 +3927,7 @@ md_apply_fix (fixS *fixP, valueT *valP, segT seg ATTRIBUTE_UNUSED)
     case BFD_RELOC_C6000_SBR_GOT_H16_W:
       if (fixP->fx_done || !seg->use_rela_p)
         {
-          valueT newval = md_chars_to_number(buf, 4);
+          valueT newval = md_chars_to_number (buf, 4);
           int shift = 16;
 
           if (fixP->fx_r_type == BFD_RELOC_C6000_SBR_H16_H)
@@ -3914,50 +3936,56 @@ md_apply_fix (fixS *fixP, valueT *valP, segT seg ATTRIBUTE_UNUSED)
                    fixP->fx_r_type == BFD_RELOC_C6000_SBR_GOT_H16_W)
             shift = 18;
 
-          MODIFY_VALUE(newval, value, shift, 7, 16);
-          md_number_to_chars(buf, newval, 4);
+          MODIFY_VALUE (newval, value, shift, 7, 16);
+          md_number_to_chars (buf, newval, 4);
         }
       if (fixP->fx_done && fixP->fx_r_type != BFD_RELOC_C6000_ABS_H16)
-        abort();
+        abort ();
       break;
 
     case BFD_RELOC_C6000_PCR_H16:
     case BFD_RELOC_C6000_PCR_L16:
       if (fixP->fx_done || !seg->use_rela_p)
         {
-          valueT newval = md_chars_to_number(buf, 4);
+          valueT newval = md_chars_to_number (buf, 4);
           int shift = (fixP->fx_r_type == BFD_RELOC_C6000_PCR_H16) ? 16 : 0;
-          MODIFY_VALUE(newval, value, shift, 7, 16);
-          md_number_to_chars(buf, newval, 4);
+
+          MODIFY_VALUE (newval, value, shift, 7, 16);
+          md_number_to_chars (buf, newval, 4);
         }
       break;
 
     case BFD_RELOC_C6000_SBR_U15_B:
       if (fixP->fx_done || !seg->use_rela_p)
         {
-          valueT newval = md_chars_to_number(buf, 4);
-          MODIFY_VALUE(newval, value, 0, 8, 15);
+          valueT newval = md_chars_to_number (buf, 4);
+
+          MODIFY_VALUE (newval, value, 0, 8, 15);
           if (value > 0x7fff)
-            as_bad_where(fixP->fx_file, fixP->fx_line,
-                        _("immediate offset out of range"));
-          md_number_to_chars(buf, newval, 4);
+            as_bad_where (fixP->fx_file, fixP->fx_line,
+                          _("immediate offset out of range"));
+
+          md_number_to_chars (buf, newval, 4);
         }
       break;
 
     case BFD_RELOC_C6000_SBR_U15_H:
       if (fixP->fx_done || !seg->use_rela_p)
         {
-          valueT newval = md_chars_to_number(buf, 4);
+          valueT newval = md_chars_to_number (buf, 4);
+
           if (fixP->tc_fix_data.fix_adda && fixP->fx_done)
             value <<= 1;
-          MODIFY_VALUE(newval, value, 1, 8, 15);
+
+          MODIFY_VALUE (newval, value, 1, 8, 15);
           if (value & 1)
-            as_bad_where(fixP->fx_file, fixP->fx_line,
-                        _("immediate offset not 2-byte-aligned"));
+            as_bad_where (fixP->fx_file, fixP->fx_line,
+                          _("immediate offset not 2-byte-aligned"));
           if (value > 0xfffe)
-            as_bad_where(fixP->fx_file, fixP->fx_line,
-                        _("immediate offset out of range"));
-          md_number_to_chars(buf, newval, 4);
+            as_bad_where (fixP->fx_file, fixP->fx_line,
+                          _("immediate offset out of range"));
+
+          md_number_to_chars (buf, newval, 4);
         }
       break;
 
@@ -3965,92 +3993,107 @@ md_apply_fix (fixS *fixP, valueT *valP, segT seg ATTRIBUTE_UNUSED)
     case BFD_RELOC_C6000_SBR_GOT_U15_W:
       if (fixP->fx_done || !seg->use_rela_p)
         {
-          valueT newval = md_chars_to_number(buf, 4);
+          valueT newval = md_chars_to_number (buf, 4);
+
           if (fixP->tc_fix_data.fix_adda && fixP->fx_done)
             value <<= 2;
-          MODIFY_VALUE(newval, value, 2, 8, 15);
+
+          MODIFY_VALUE (newval, value, 2, 8, 15);
           if (value & 3)
-            as_bad_where(fixP->fx_file, fixP->fx_line,
-                        _("immediate offset not 4-byte-aligned"));
+            as_bad_where (fixP->fx_file, fixP->fx_line,
+                          _("immediate offset not 4-byte-aligned"));
           if (value > 0x1fffc)
-            as_bad_where(fixP->fx_file, fixP->fx_line,
-                        _("immediate offset out of range"));
-          md_number_to_chars(buf, newval, 4);
+            as_bad_where (fixP->fx_file, fixP->fx_line,
+                          _("immediate offset out of range"));
+
+          md_number_to_chars (buf, newval, 4);
         }
       if (fixP->fx_done && fixP->fx_r_type != BFD_RELOC_C6000_SBR_U15_W)
-        abort();
+        abort ();
       break;
 
     case BFD_RELOC_C6000_DSBT_INDEX:
       if (value != 0)
-        as_bad_where(fixP->fx_file, fixP->fx_line,
-                    _("addend used with $DSBT_INDEX"));
+        as_bad_where (fixP->fx_file, fixP->fx_line,
+                      _("addend used with $DSBT_INDEX"));
       if (fixP->fx_done)
-        abort();
+        abort ();
       break;
 
     case BFD_RELOC_C6000_PCR_S21:
       if (fixP->fx_done || !seg->use_rela_p)
         {
-          valueT newval = md_chars_to_number(buf, 4);
-          MODIFY_VALUE(newval, value, 2, 7, 21);
+          valueT newval = md_chars_to_number (buf, 4);
+
+          MODIFY_VALUE (newval, value, 2, 7, 21);
+
           if (value & 3)
-            as_bad_where(fixP->fx_file, fixP->fx_line,
-                        _("PC-relative offset not 4-byte-aligned"));
+            as_bad_where (fixP->fx_file, fixP->fx_line,
+                          _("PC-relative offset not 4-byte-aligned"));
           if (value + 0x400000 > 0x3ffffc + 0x400000)
-            as_bad_where(fixP->fx_file, fixP->fx_line,
-                        _("PC-relative offset out of range"));
-          md_number_to_chars(buf, newval, 4);
+            as_bad_where (fixP->fx_file, fixP->fx_line,
+                          _("PC-relative offset out of range"));
+
+          md_number_to_chars (buf, newval, 4);
         }
       break;
 
     case BFD_RELOC_C6000_PCR_S12:
       if (fixP->fx_done || !seg->use_rela_p)
         {
-          valueT newval = md_chars_to_number(buf, 4);
-          MODIFY_VALUE(newval, value, 2, 16, 12);
+          valueT newval = md_chars_to_number (buf, 4);
+
+          MODIFY_VALUE (newval, value, 2, 16, 12);
+
           if (value & 3)
-            as_bad_where(fixP->fx_file, fixP->fx_line,
-                        _("PC-relative offset not 4-byte-aligned"));
+            as_bad_where (fixP->fx_file, fixP->fx_line,
+                          _("PC-relative offset not 4-byte-aligned"));
           if (value + 0x2000 > 0x1ffc + 0x2000)
-            as_bad_where(fixP->fx_file, fixP->fx_line,
-                        _("PC-relative offset out of range"));
-          md_number_to_chars(buf, newval, 4);
+            as_bad_where (fixP->fx_file, fixP->fx_line,
+                          _("PC-relative offset out of range"));
+
+          md_number_to_chars (buf, newval, 4);
         }
       break;
 
     case BFD_RELOC_C6000_PCR_S10:
       if (fixP->fx_done || !seg->use_rela_p)
         {
-          valueT newval = md_chars_to_number(buf, 4);
-          MODIFY_VALUE(newval, value, 2, 13, 10);
+          valueT newval = md_chars_to_number (buf, 4);
+
+          MODIFY_VALUE (newval, value, 2, 13, 10);
+
           if (value & 3)
-            as_bad_where(fixP->fx_file, fixP->fx_line,
-                        _("PC-relative offset not 4-byte-aligned"));
+            as_bad_where (fixP->fx_file, fixP->fx_line,
+                          _("PC-relative offset not 4-byte-aligned"));
           if (value + 0x800 > 0x7fc + 0x800)
-            as_bad_where(fixP->fx_file, fixP->fx_line,
-                        _("PC-relative offset out of range"));
-          md_number_to_chars(buf, newval, 4);
+            as_bad_where (fixP->fx_file, fixP->fx_line,
+                          _("PC-relative offset out of range"));
+
+          md_number_to_chars (buf, newval, 4);
         }
       break;
 
     case BFD_RELOC_C6000_PCR_S7:
       if (fixP->fx_done || !seg->use_rela_p)
         {
-          valueT newval = md_chars_to_number(buf, 4);
-          MODIFY_VALUE(newval, value, 2, 16, 7);
+          valueT newval = md_chars_to_number (buf, 4);
+
+          MODIFY_VALUE (newval, value, 2, 16, 7);
+
           if (value & 3)
-            as_bad_where(fixP->fx_file, fixP->fx_line,
-                        _("PC-relative offset not 4-byte-aligned"));
+            as_bad_where (fixP->fx_file, fixP->fx_line,
+                          _("PC-relative offset not 4-byte-aligned"));
           if (value + 0x100 > 0xfc + 0x100)
-            as_bad_where(fixP->fx_file, fixP->fx_line,
-                        _("PC-relative offset out of range"));
-          md_number_to_chars(buf, newval, 4);
+            as_bad_where (fixP->fx_file, fixP->fx_line,
+                          _("PC-relative offset out of range"));
+
+          md_number_to_chars (buf, newval, 4);
         }
       break;
 
     default:
-      abort();
+      abort ();
     }
 }
 
@@ -4059,10 +4102,10 @@ md_apply_fix (fixS *fixP, valueT *valP, segT seg ATTRIBUTE_UNUSED)
 const char *
 md_atof (int type, char *litP, int *sizeP)
 {
-  if (litP == NULL || sizeP == NULL)
-    {
-      return "Invalid parameters";
-    }
+  if (litP == NULL || sizeP == NULL) {
+    return "Invalid parameters";
+  }
+  
   return ieee_md_atof (type, litP, sizeP, target_big_endian);
 }
 
@@ -4103,7 +4146,175 @@ tic6x_adjust_section (bfd *abfd ATTRIBUTE_UNUSED, segT section,
 	}
 
   if (have_code && !have_non_code)
-    tic6x_process_code_only_section(info);
+    {
+      unsigned int want_insert = 0;
+      unsigned int want_insert_done_so_far = 0;
+      unsigned int pos = 0;
+
+      frchainS *frchp_last32, *frchp_last16, *frchp_last8;
+      fragS *fragp_last32, *fragp_last16, *fragp_last8;
+      unsigned int pos_last32, pos_last16, pos_last8;
+
+      frchp_last32 = frchp_last16 = frchp_last8 = info->frchainP;
+      fragp_last32 = fragp_last16 = fragp_last8 = info->frchainP->frch_root;
+      pos_last32 = pos_last16 = pos_last8 = 0;
+
+      for (frchp = info->frchainP; frchp; frchp = frchp->frch_next)
+	for (fragp = frchp->frch_root; fragp; fragp = fragp->fr_next)
+	look_at_frag:
+	  {
+	    bool go_back = false;
+	    frchainS *frchp_next;
+	    fragS *fragp_next;
+
+	    if (fragp->fr_type != rs_machine_dependent)
+	      continue;
+
+	    if (fragp->tc_frag_data.is_insns
+		&& pos + fragp->fr_fix > 32
+		&& !fragp->tc_frag_data.can_cross_fp_boundary)
+	      {
+		if (want_insert || (pos & 3))
+		  abort ();
+
+		want_insert = (32 - pos) >> 2;
+		if (want_insert > 7)
+		  abort ();
+		want_insert_done_so_far = 0;
+		go_back = true;
+	      }
+
+	    if (!fragp->tc_frag_data.is_insns)
+	      {
+		unsigned int would_insert_bytes;
+
+		if (!(pos & ((1 << fragp->fr_offset) - 1)))
+		  continue;
+
+		if (want_insert)
+		  abort ();
+
+		would_insert_bytes
+		  = ((1 << fragp->fr_offset)
+		     - (pos & ((1 << fragp->fr_offset) - 1)));
+
+		if (fragp->fr_subtype != 0
+		    && would_insert_bytes > fragp->fr_subtype)
+		  continue;
+
+		if (fragp->fr_offset != 3
+		    && fragp->fr_offset != 4
+		    && fragp->fr_offset != 5)
+		  abort ();
+
+		if (would_insert_bytes & 3)
+		  abort ();
+		want_insert = would_insert_bytes >> 2;
+		if (want_insert > 7)
+		  abort ();
+		want_insert_done_so_far = 0;
+		go_back = true;
+	      }
+	    else if (want_insert && !go_back)
+	      {
+		unsigned int num_insns = fragp->fr_fix >> 2;
+		unsigned int max_poss_nops = 8 - num_insns;
+
+		if (max_poss_nops)
+		  {
+		    unsigned int cur_want_nops, max_want_nops, do_nops, i;
+
+		    if (want_insert & 1)
+		      cur_want_nops = 1;
+		    else if (want_insert & 2)
+		      cur_want_nops = 2;
+		    else if (want_insert & 4)
+		      cur_want_nops = 4;
+		    else
+		      abort ();
+
+		    max_want_nops = cur_want_nops - want_insert_done_so_far;
+
+		    do_nops = (max_poss_nops < max_want_nops
+			       ? max_poss_nops
+			       : max_want_nops);
+		    for (i = 0; i < do_nops; i++)
+		      {
+			md_number_to_chars (fragp->fr_literal + fragp->fr_fix,
+					    0, 4);
+			if (target_big_endian)
+			  fragp->fr_literal[fragp->fr_fix - 1] |= 0x1;
+			else
+			  fragp->fr_literal[fragp->fr_fix - 4] |= 0x1;
+			fragp->fr_fix += 4;
+			fragp->fr_var -= 4;
+		      }
+		    want_insert_done_so_far += do_nops;
+		    if (want_insert_done_so_far == cur_want_nops)
+		      {
+			want_insert -= want_insert_done_so_far;
+			want_insert_done_so_far = 0;
+			if (want_insert)
+			  go_back = true;
+		      }
+		  }
+	      }
+	    if (go_back)
+	      {
+		if (want_insert & 1)
+		  {
+		    frchp = frchp_last8;
+		    fragp = fragp_last8;
+		    pos = pos_last8;
+		  }
+		else if (want_insert & 2)
+		  {
+		    frchp = frchp_last8 = frchp_last16;
+		    fragp = fragp_last8 = fragp_last16;
+		    pos = pos_last8 = pos_last16;
+		  }
+		else if (want_insert & 4)
+		  {
+		    frchp = frchp_last8 = frchp_last16 = frchp_last32;
+		    fragp = fragp_last8 = fragp_last16 = fragp_last32;
+		    pos = pos_last8 = pos_last16 = pos_last32;
+		  }
+		else
+		  abort ();
+
+		goto look_at_frag;
+	      }
+
+	    pos += fragp->fr_fix;
+	    pos &= 31;
+	    frchp_next = frchp;
+	    fragp_next = fragp->fr_next;
+	    if (fragp_next == NULL)
+	      {
+		frchp_next = frchp->frch_next;
+		if (frchp_next != NULL)
+		  fragp_next = frchp_next->frch_root;
+	      }
+	    if (!(pos & 7))
+	      {
+		frchp_last8 = frchp_next;
+		fragp_last8 = fragp_next;
+		pos_last8 = pos;
+	      }
+	    if (!(pos & 15))
+	      {
+		frchp_last16 = frchp_next;
+		fragp_last16 = fragp_next;
+		pos_last16 = pos;
+	      }
+	    if (!(pos & 31))
+	      {
+		frchp_last32 = frchp_next;
+		fragp_last32 = fragp_next;
+		pos_last32 = pos;
+	      }
+	  }
+    }
 
   for (frchp = info->frchainP; frchp; frchp = frchp->frch_next)
     for (fragp = frchp->frch_root; fragp; fragp = fragp->fr_next)
@@ -4122,224 +4333,17 @@ tic6x_adjust_section (bfd *abfd ATTRIBUTE_UNUSED, segT section,
       }
 }
 
-static void
-tic6x_process_code_only_section(segment_info_type *info)
-{
-  struct tic6x_alignment_state {
-    unsigned int want_insert;
-    unsigned int want_insert_done_so_far;
-    unsigned int pos;
-    frchainS *frchp_last32, *frchp_last16, *frchp_last8;
-    fragS *fragp_last32, *fragp_last16, *fragp_last8;
-    unsigned int pos_last32, pos_last16, pos_last8;
-  } state;
-
-  memset(&state, 0, sizeof(state));
-  state.frchp_last32 = state.frchp_last16 = state.frchp_last8 = info->frchainP;
-  state.fragp_last32 = state.fragp_last16 = state.fragp_last8 = info->frchainP->frch_root;
-
-  frchainS *frchp = info->frchainP;
-  fragS *fragp = info->frchainP->frch_root;
-
-  while (frchp)
-    {
-      while (fragp)
-        {
-          if (fragp->fr_type == rs_machine_dependent)
-            {
-              if (tic6x_process_fragment(fragp, &state))
-                {
-                  tic6x_rewind_to_alignment_point(&frchp, &fragp, &state);
-                  continue;
-                }
-              tic6x_update_alignment_points(frchp, fragp, &state);
-            }
-          
-          fragp = fragp->fr_next;
-          if (!fragp && frchp->frch_next)
-            {
-              frchp = frchp->frch_next;
-              fragp = frchp->frch_root;
-            }
-        }
-      if (!fragp)
-        break;
-    }
-}
-
-static bool
-tic6x_process_fragment(fragS *fragp, struct tic6x_alignment_state *state)
-{
-  if (fragp->tc_frag_data.is_insns)
-    {
-      if (state->pos + fragp->fr_fix > 32 && !fragp->tc_frag_data.can_cross_fp_boundary)
-        {
-          if (state->want_insert || (state->pos & 3))
-            abort();
-          
-          state->want_insert = (32 - state->pos) >> 2;
-          if (state->want_insert > 7)
-            abort();
-          state->want_insert_done_so_far = 0;
-          return true;
-        }
-      
-      if (state->want_insert)
-        tic6x_insert_nops(fragp, state);
-    }
-  else
-    {
-      return tic6x_handle_alignment_requirement(fragp, state);
-    }
-  
-  return false;
-}
-
-static bool
-tic6x_handle_alignment_requirement(fragS *fragp, struct tic6x_alignment_state *state)
-{
-  unsigned int alignment_mask = (1 << fragp->fr_offset) - 1;
-  
-  if (!(state->pos & alignment_mask))
-    return false;
-  
-  if (state->want_insert)
-    abort();
-  
-  unsigned int would_insert_bytes = (1 << fragp->fr_offset) - (state->pos & alignment_mask);
-  
-  if (fragp->fr_subtype != 0 && would_insert_bytes > fragp->fr_subtype)
-    return false;
-  
-  if (fragp->fr_offset < 3 || fragp->fr_offset > 5 || (would_insert_bytes & 3))
-    abort();
-  
-  state->want_insert = would_insert_bytes >> 2;
-  if (state->want_insert > 7)
-    abort();
-  state->want_insert_done_so_far = 0;
-  return true;
-}
-
-static void
-tic6x_insert_nops(fragS *fragp, struct tic6x_alignment_state *state)
-{
-  unsigned int num_insns = fragp->fr_fix >> 2;
-  unsigned int max_poss_nops = 8 - num_insns;
-  
-  if (!max_poss_nops)
-    return;
-  
-  unsigned int cur_want_nops = tic6x_get_current_want_nops(state->want_insert);
-  unsigned int max_want_nops = cur_want_nops - state->want_insert_done_so_far;
-  unsigned int do_nops = (max_poss_nops < max_want_nops) ? max_poss_nops : max_want_nops;
-  
-  for (unsigned int i = 0; i < do_nops; i++)
-    {
-      md_number_to_chars(fragp->fr_literal + fragp->fr_fix, 0, 4);
-      if (target_big_endian)
-        fragp->fr_literal[fragp->fr_fix - 1] |= 0x1;
-      else
-        fragp->fr_literal[fragp->fr_fix - 4] |= 0x1;
-      fragp->fr_fix += 4;
-      fragp->fr_var -= 4;
-    }
-  
-  state->want_insert_done_so_far += do_nops;
-  if (state->want_insert_done_so_far == cur_want_nops)
-    {
-      state->want_insert -= state->want_insert_done_so_far;
-      state->want_insert_done_so_far = 0;
-    }
-}
-
-static unsigned int
-tic6x_get_current_want_nops(unsigned int want_insert)
-{
-  if (want_insert & 1)
-    return 1;
-  if (want_insert & 2)
-    return 2;
-  if (want_insert & 4)
-    return 4;
-  abort();
-  return 0;
-}
-
-static void
-tic6x_rewind_to_alignment_point(frchainS **frchp, fragS **fragp, 
-                                struct tic6x_alignment_state *state)
-{
-  if (state->want_insert & 1)
-    {
-      *frchp = state->frchp_last8;
-      *fragp = state->fragp_last8;
-      state->pos = state->pos_last8;
-    }
-  else if (state->want_insert & 2)
-    {
-      *frchp = state->frchp_last8 = state->frchp_last16;
-      *fragp = state->fragp_last8 = state->fragp_last16;
-      state->pos = state->pos_last8 = state->pos_last16;
-    }
-  else if (state->want_insert & 4)
-    {
-      *frchp = state->frchp_last8 = state->frchp_last16 = state->frchp_last32;
-      *fragp = state->fragp_last8 = state->fragp_last16 = state->fragp_last32;
-      state->pos = state->pos_last8 = state->pos_last16 = state->pos_last32;
-    }
-  else
-    {
-      abort();
-    }
-}
-
-static void
-tic6x_update_alignment_points(frchainS *frchp, fragS *fragp,
-                              struct tic6x_alignment_state *state)
-{
-  state->pos += fragp->fr_fix;
-  state->pos &= 31;
-  
-  frchainS *frchp_next = frchp;
-  fragS *fragp_next = fragp->fr_next;
-  
-  if (!fragp_next)
-    {
-      frchp_next = frchp->frch_next;
-      if (frchp_next)
-        fragp_next = frchp_next->frch_root;
-    }
-  
-  if (!(state->pos & 7))
-    {
-      state->frchp_last8 = frchp_next;
-      state->fragp_last8 = fragp_next;
-      state->pos_last8 = state->pos;
-    }
-  if (!(state->pos & 15))
-    {
-      state->frchp_last16 = frchp_next;
-      state->fragp_last16 = fragp_next;
-      state->pos_last16 = state->pos;
-    }
-  if (!(state->pos & 31))
-    {
-      state->frchp_last32 = frchp_next;
-      state->fragp_last32 = fragp_next;
-      state->pos_last32 = state->pos;
-    }
-}
-
 /* Initialize the machine-dependent parts of a frag.  */
 
-void tic6x_frag_init(fragS *fragp)
+void
+tic6x_frag_init (fragS *fragp)
 {
-    if (fragp != NULL)
-    {
-        fragp->tc_frag_data.is_insns = false;
-        fragp->tc_frag_data.can_cross_fp_boundary = false;
-    }
+  if (fragp == NULL) {
+    return;
+  }
+  
+  fragp->tc_frag_data.is_insns = false;
+  fragp->tc_frag_data.can_cross_fp_boundary = false;
 }
 
 /* Set an attribute if it has not already been set by the user.  */
@@ -4348,53 +4352,53 @@ static void
 tic6x_set_attribute_int (int tag, int value)
 {
   if (tag < 1 || tag >= NUM_KNOWN_OBJ_ATTRIBUTES)
-    {
-      as_fatal (_("invalid attribute tag: %d"), tag);
-      return;
-    }
+    abort ();
   
   if (tic6x_attributes_set_explicitly[tag])
     return;
     
   if (!bfd_elf_add_proc_attr_int (stdoutput, tag, value))
-    {
-      as_fatal (_("error adding attribute: %s"),
-                bfd_errmsg (bfd_get_error ()));
-    }
+    as_fatal (_("error adding attribute: %s"), bfd_errmsg (bfd_get_error ()));
 }
 
 /* Set object attributes deduced from the input file and command line
    rather than given explicitly.  */
-static void tic6x_set_attributes(void)
+static void
+tic6x_set_attributes (void)
 {
-    if (tic6x_arch_attribute == C6XABI_Tag_ISA_none) {
-        tic6x_arch_attribute = C6XABI_Tag_ISA_C674X;
-    }
-
-    tic6x_set_attribute_int(Tag_ISA, tic6x_arch_attribute);
-    tic6x_set_attribute_int(Tag_ABI_DSBT, tic6x_dsbt);
-    tic6x_set_attribute_int(Tag_ABI_PID, tic6x_pid);
-    tic6x_set_attribute_int(Tag_ABI_PIC, tic6x_pic);
+  int arch_attr = (tic6x_arch_attribute == C6XABI_Tag_ISA_none) ? 
+                  C6XABI_Tag_ISA_C674X : tic6x_arch_attribute;
+  
+  tic6x_set_attribute_int (Tag_ISA, arch_attr);
+  tic6x_set_attribute_int (Tag_ABI_DSBT, tic6x_dsbt);
+  tic6x_set_attribute_int (Tag_ABI_PID, tic6x_pid);
+  tic6x_set_attribute_int (Tag_ABI_PIC, tic6x_pic);
 }
 
 /* Do machine-dependent manipulations of the frag chains after all
    input has been read and before the machine-independent sizing and
    relaxing.  */
 
-void tic6x_md_finish(void)
+void
+tic6x_md_finish (void)
 {
-    tic6x_set_attributes();
-    bfd_map_over_sections(stdoutput, tic6x_adjust_section, NULL);
+  tic6x_set_attributes ();
+  
+  if (stdoutput != NULL) {
+    bfd_map_over_sections (stdoutput, tic6x_adjust_section, NULL);
+  }
 }
 
 /* No machine-dependent frags at this stage; all converted in
    tic6x_md_finish.  */
 
 void
-md_convert_frag (bfd *abfd ATTRIBUTE_UNUSED, segT asec ATTRIBUTE_UNUSED,
-		 fragS *fragp ATTRIBUTE_UNUSED)
+md_convert_frag (bfd *abfd, segT asec, fragS *fragp)
 {
-  abort ();
+  (void)abfd;
+  (void)asec;
+  (void)fragp;
+  abort();
 }
 
 /* No machine-dependent frags at this stage; all converted in
@@ -4402,30 +4406,33 @@ md_convert_frag (bfd *abfd ATTRIBUTE_UNUSED, segT asec ATTRIBUTE_UNUSED,
 
 int
 md_estimate_size_before_relax (fragS *fragp ATTRIBUTE_UNUSED,
-                               segT seg ATTRIBUTE_UNUSED)
+			       segT seg ATTRIBUTE_UNUSED)
 {
-  return 0;
+  return -1;
 }
 
 /* Put a number into target byte order.  */
 
-void md_number_to_chars(char *buf, valueT val, int n)
+void
+md_number_to_chars (char *buf, valueT val, int n)
 {
-    if (buf == NULL || n <= 0) {
-        return;
-    }
-    
-    if (target_big_endian) {
-        number_to_chars_bigendian(buf, val, n);
-    } else {
-        number_to_chars_littleendian(buf, val, n);
-    }
+  if (buf == NULL || n <= 0) {
+    return;
+  }
+  
+  if (target_big_endian) {
+    number_to_chars_bigendian (buf, val, n);
+  } else {
+    number_to_chars_littleendian (buf, val, n);
+  }
 }
 
 /* Machine-dependent operand parsing not currently needed.  */
 
-void md_operand(expressionS *op ATTRIBUTE_UNUSED)
+void
+md_operand (expressionS *op)
 {
+    (void)op;
 }
 
 /* PC-relative operands are relative to the start of the fetch
@@ -4434,37 +4441,41 @@ void md_operand(expressionS *op ATTRIBUTE_UNUSED)
 long
 tic6x_pcrel_from_section (fixS *fixp, segT sec)
 {
-  if (fixp == NULL)
-    return 0;
-    
   if (fixp->fx_addsy == NULL)
     return (fixp->fx_where + fixp->fx_frag->fr_address) & ~0x1fULL;
     
-  if (!S_IS_DEFINED (fixp->fx_addsy))
-    return 0;
+  if (S_IS_DEFINED (fixp->fx_addsy) && S_GET_SEGMENT (fixp->fx_addsy) == sec)
+    return (fixp->fx_where + fixp->fx_frag->fr_address) & ~0x1fULL;
     
-  if (S_GET_SEGMENT (fixp->fx_addsy) != sec)
-    return 0;
-    
-  return (fixp->fx_where + fixp->fx_frag->fr_address) & ~0x1fULL;
+  return 0;
 }
 
 /* Round up a section size to the appropriate boundary.  */
 
 valueT
-md_section_align (segT segment ATTRIBUTE_UNUSED, valueT size)
+md_section_align (segT segment ATTRIBUTE_UNUSED,
+		  valueT size)
 {
   int align = bfd_section_alignment (segment);
-  valueT alignment_mask = (valueT)1 << align;
-  valueT alignment_offset = alignment_mask - 1;
-  return (size + alignment_offset) & ~alignment_offset;
+  valueT alignment_mask;
+  valueT alignment_size;
+  
+  if (align < 0 || align >= (int)(sizeof(valueT) * 8)) {
+    return size;
+  }
+  
+  alignment_size = (valueT)1 << align;
+  alignment_mask = ~(alignment_size - 1);
+  
+  return (size + alignment_size - 1) & alignment_mask;
 }
 
 /* No special undefined symbol handling needed for now.  */
 
 symbolS *
-md_undefined_symbol (char *name ATTRIBUTE_UNUSED)
+md_undefined_symbol (char *name)
 {
+  (void)name;
   return NULL;
 }
 
@@ -4478,57 +4489,65 @@ tc_gen_reloc (asection *section ATTRIBUTE_UNUSED, fixS *fixp)
   asymbol *symbol;
   bfd_reloc_code_real_type r_type;
 
-  reloc = notes_alloc (sizeof (arelent));
-  if (reloc == NULL)
+  if (!fixp || !fixp->fx_addsy) {
     return NULL;
+  }
+
+  reloc = notes_alloc (sizeof (arelent));
+  if (!reloc) {
+    return NULL;
+  }
 
   reloc->sym_ptr_ptr = notes_alloc (sizeof (asymbol *));
-  if (reloc->sym_ptr_ptr == NULL)
+  if (!reloc->sym_ptr_ptr) {
     return NULL;
+  }
 
   symbol = symbol_get_bfdsym (fixp->fx_addsy);
+  if (!symbol) {
+    return NULL;
+  }
+
   *reloc->sym_ptr_ptr = symbol;
   reloc->address = fixp->fx_frag->fr_address + fixp->fx_where;
-  reloc->addend = tic6x_generate_rela ? fixp->fx_offset : 0;
+  reloc->addend = (tic6x_generate_rela ? fixp->fx_offset : 0);
   r_type = fixp->fx_r_type;
   reloc->howto = bfd_reloc_type_lookup (stdoutput, r_type);
 
-  if (reloc->howto == NULL)
-    {
+  if (!reloc->howto) {
+    as_bad_where (fixp->fx_file, fixp->fx_line,
+                  _("Cannot represent relocation type %s"),
+                  bfd_get_reloc_code_name (r_type));
+    return NULL;
+  }
+
+  if (reloc->howto->pcrel_offset && reloc->howto->partial_inplace) {
+    reloc->addend += reloc->address;
+    if (!bfd_is_com_section (bfd_asymbol_section (symbol))) {
+      reloc->addend -= symbol->value;
+    }
+  }
+
+  if (r_type == BFD_RELOC_C6000_PCR_H16 || r_type == BFD_RELOC_C6000_PCR_L16) {
+    symbolS *t = fixp->tc_fix_data.fix_subsy;
+    if (!t) {
       as_bad_where (fixp->fx_file, fixp->fx_line,
-		    _("Cannot represent relocation type %s"),
-		    bfd_get_reloc_code_name (r_type));
+                    _("missing symbol in PCR relocation"));
       return NULL;
     }
 
-  if (reloc->howto->pcrel_offset && reloc->howto->partial_inplace)
-    {
-      reloc->addend += reloc->address;
-      if (!bfd_is_com_section (bfd_asymbol_section (symbol)))
-	reloc->addend -= symbol->value;
+    resolve_symbol_value (t);
+    segT sub_symbol_segment = S_GET_SEGMENT (t);
+    if (sub_symbol_segment == undefined_section) {
+      as_bad_where (fixp->fx_file, fixp->fx_line,
+                    _("undefined symbol %s in PCR relocation"),
+                    S_GET_NAME (t));
+    } else {
+      reloc->addend = reloc->address & ~0x1F;
+      reloc->addend -= S_GET_VALUE (t);
     }
+  }
 
-  if (r_type == BFD_RELOC_C6000_PCR_H16 || r_type == BFD_RELOC_C6000_PCR_L16)
-    {
-      symbolS *sub_symbol = fixp->tc_fix_data.fix_subsy;
-      segT sub_symbol_segment;
-
-      resolve_symbol_value (sub_symbol);
-      sub_symbol_segment = S_GET_SEGMENT (sub_symbol);
-      
-      if (sub_symbol_segment == undefined_section)
-        {
-          as_bad_where (fixp->fx_file, fixp->fx_line,
-		        _("undefined symbol %s in PCR relocation"),
-		        S_GET_NAME (sub_symbol));
-        }
-      else
-        {
-          reloc->addend = reloc->address & ~0x1F;
-          reloc->addend -= S_GET_VALUE (sub_symbol);
-        }
-    }
-    
   return reloc;
 }
 
@@ -4546,23 +4565,25 @@ tic6x_regname_to_dw2regnum (char *regname)
   if (reg.num >= 32)
     return -1;
 
-  if (reg.side == 1)
-    return (reg.num < 16) ? reg.num : (reg.num - 16) + 37;
-  
-  if (reg.side == 2)
-    return (reg.num < 16) ? reg.num + 16 : (reg.num - 16) + 53;
+  switch (reg.side)
+    {
+    case 1:
+      return (reg.num < 16) ? reg.num : (reg.num - 16) + 37;
 
-  return -1;
+    case 2:
+      return (reg.num < 16) ? reg.num + 16 : (reg.num - 16) + 53;
+
+    default:
+      return -1;
+    }
 }
 
 /* Initialize the DWARF-2 unwind information for this procedure.  */
 
-void tic6x_frame_initial_instructions(void)
+void
+tic6x_frame_initial_instructions(void)
 {
-  const int STACK_POINTER_REGISTER = 31;
-  const int INITIAL_OFFSET = 0;
-  
-  cfi_add_CFA_def_cfa(STACK_POINTER_REGISTER, INITIAL_OFFSET);
+    cfi_add_CFA_def_cfa(31, 0);
 }
 
 /* Start an exception table entry.  If idx is nonzero this is an index table
@@ -4572,11 +4593,14 @@ static void
 tic6x_start_unwind_section (const segT text_seg, int idx)
 {
   tic6x_unwind_info *unwind = tic6x_get_unwind ();
-  const char *text_name;
-  const char *prefix;
-  const char *prefix_once;
+  const char * text_name;
+  const char * prefix;
+  const char * prefix_once;
   struct elf_section_match match;
-  char *sec_name;
+  size_t prefix_len;
+  size_t text_len;
+  char * sec_name;
+  size_t sec_name_len;
   int type;
   int flags;
   int linkonce;
@@ -4595,25 +4619,28 @@ tic6x_start_unwind_section (const segT text_seg, int idx)
     }
 
   text_name = segment_name (text_seg);
-  if (streq (text_name, ".text"))
+  if (text_name && streq (text_name, ".text"))
     text_name = "";
 
-  if (startswith (text_name, ".gnu.linkonce.t."))
+  if (text_name && startswith (text_name, ".gnu.linkonce.t."))
     {
       prefix = prefix_once;
       text_name += strlen (".gnu.linkonce.t.");
     }
 
-  size_t prefix_len = strlen (prefix);
-  size_t text_len = strlen (text_name);
-  size_t sec_name_len = prefix_len + text_len;
-  
+  prefix_len = strlen (prefix);
+  text_len = text_name ? strlen (text_name) : 0;
+  sec_name_len = prefix_len + text_len;
   sec_name = XNEWVEC (char, sec_name_len + 1);
   if (!sec_name)
-    return;
-    
+    {
+      as_bad (_("memory allocation failed"));
+      return;
+    }
+  
   memcpy (sec_name, prefix, prefix_len);
-  memcpy (sec_name + prefix_len, text_name, text_len);
+  if (text_name)
+    memcpy (sec_name + prefix_len, text_name, text_len);
   sec_name[sec_name_len] = '\0';
 
   flags = SHF_ALLOC;
@@ -4623,13 +4650,13 @@ tic6x_start_unwind_section (const segT text_seg, int idx)
   if (prefix != prefix_once && (text_seg->flags & SEC_LINK_ONCE) != 0)
     {
       match.group_name = elf_group_name (text_seg);
-      if (!match.group_name)
-        {
-          as_bad (_("group section `%s' has no group signature"),
-                  segment_name (text_seg));
-          ignore_rest_of_line ();
-          return;
-        }
+      if (match.group_name == NULL)
+	{
+	  as_bad (_("group section `%s' has no group signature"),
+		  segment_name (text_seg));
+	  ignore_rest_of_line ();
+	  return;
+	}
       flags |= SHF_GROUP;
       linkonce = 1;
     }
@@ -4660,16 +4687,19 @@ tic6x_pop_rts_offset_big[TIC6X_NUM_UNWIND_REGS] =
   { -2,  1,  0, -4, -3, -8, -7,-12, -1, -6, -5,-10, -9};
 
 /* Map from dwarf register number to unwind frame register number.  */
-static int tic6x_unwind_reg_from_dwarf(int dwarf)
+static int
+tic6x_unwind_reg_from_dwarf (int dwarf)
 {
-    for (int reg = 0; reg < TIC6X_NUM_UNWIND_REGS; reg++)
-    {
-        if (tic6x_unwind_frame_regs[reg] == dwarf)
-        {
-            return reg;
-        }
-    }
+  if (dwarf < 0)
     return -1;
+    
+  for (int reg = 0; reg < TIC6X_NUM_UNWIND_REGS; reg++)
+    {
+      if (tic6x_unwind_frame_regs[reg] == dwarf)
+        return reg;
+    }
+
+  return -1;
 }
 
 /* Unwinding bytecode definitions.  */
@@ -4688,8 +4718,12 @@ static int tic6x_unwind_reg_from_dwarf(int dwarf)
 static void
 tic6x_flush_unwind_word (valueT data)
 {
-  tic6x_unwind_info *unwind = tic6x_get_unwind ();
+  tic6x_unwind_info *unwind;
   char *ptr;
+
+  unwind = tic6x_get_unwind ();
+  if (unwind == NULL)
+    return;
 
   if (unwind->table_entry == NULL)
     {
@@ -4698,11 +4732,15 @@ tic6x_flush_unwind_word (valueT data)
       record_alignment (now_seg, 2);
       unwind->table_entry = expr_build_dot ();
       ptr = frag_more (4);
+      if (ptr == NULL)
+        return;
       unwind->frag_start = ptr;
     }
   else
     {
       ptr = frag_more (4);
+      if (ptr == NULL)
+        return;
     }
 
   md_number_to_chars (ptr, data, 4);
@@ -4711,62 +4749,58 @@ tic6x_flush_unwind_word (valueT data)
 /* Add a single byte of unwinding data.  */
 
 static void
-tic6x_unwind_byte (int byte)
+tic6x_unwind_byte(int byte)
 {
-  tic6x_unwind_info *unwind = tic6x_get_unwind ();
+  tic6x_unwind_info *unwind = tic6x_get_unwind();
   
-  if (!unwind)
+  if (!unwind) {
     return;
-    
+  }
+
   unwind->data_bytes++;
   
-  if (unwind->data_bytes == 5)
-    {
-      if (unwind->personality_index == -1)
-        {
-          unwind->personality_index = 1;
-          tic6x_flush_unwind_word (0x81000000 | ((unwind->data >> 8) & 0xffff));
-          unwind->data = ((unwind->data & 0xff) << 8) | (byte & 0xff);
-          unwind->data_bytes++;
-        }
-      else
-        {
-          tic6x_flush_unwind_word (unwind->data);
-          unwind->data = byte & 0xff;
-        }
-      return;
+  if (unwind->data_bytes == 5) {
+    if (unwind->personality_index == -1) {
+      unwind->personality_index = 1;
+      tic6x_flush_unwind_word(0x81000000 | ((unwind->data >> 8) & 0xffff));
+      unwind->data = ((unwind->data & 0xff) << 8) | byte;
+      unwind->data_bytes++;
+    } else {
+      tic6x_flush_unwind_word(unwind->data);
+      unwind->data = byte;
     }
-  
-  unwind->data = (unwind->data << 8) | (byte & 0xff);
-  
-  if (unwind->data_bytes > 4 && (unwind->data_bytes & 3) == 0)
-    {
-      tic6x_flush_unwind_word (unwind->data);
+  } else {
+    unwind->data = (unwind->data << 8) | byte;
+    if ((unwind->data_bytes & 3) == 0 && unwind->data_bytes > 4) {
+      tic6x_flush_unwind_word(unwind->data);
       unwind->data = 0;
     }
+  }
 }
 
 /* Add a two-byte unwinding opcode.  */
 static void
-tic6x_unwind_2byte (int bytes)
+tic6x_unwind_2byte(int bytes)
 {
-  tic6x_unwind_byte ((bytes >> 8) & 0xff);
-  tic6x_unwind_byte (bytes & 0xff);
+    unsigned char high_byte = (unsigned char)((bytes >> 8) & 0xFF);
+    unsigned char low_byte = (unsigned char)(bytes & 0xFF);
+    
+    tic6x_unwind_byte(high_byte);
+    tic6x_unwind_byte(low_byte);
 }
 
 static void
 tic6x_unwind_uleb (offsetT offset)
 {
-  if (offset < 0)
-    return;
-    
-  do {
-    unsigned char byte = offset & 0x7f;
-    offset >>= 7;
-    if (offset != 0)
-      byte |= 0x80;
-    tic6x_unwind_byte (byte);
-  } while (offset != 0);
+  const unsigned char CONTINUATION_BIT = 0x80;
+  const unsigned char VALUE_MASK = 0x7f;
+  
+  while (offset > VALUE_MASK)
+    {
+      tic6x_unwind_byte ((offset & VALUE_MASK) | CONTINUATION_BIT);
+      offset >>= 7;
+    }
+  tic6x_unwind_byte (offset & VALUE_MASK);
 }
 
 void
@@ -4777,65 +4811,77 @@ tic6x_cfi_startproc (void)
   if (unwind == NULL)
     return;
 
-  if (unwind->table_entry != NULL)
-    {
-      as_bad (_("missing .endp before .cfi_startproc"));
-      unwind->table_entry = NULL;
-    }
-
   unwind->personality_index = -1;
   unwind->personality_routine = NULL;
+  
+  if (unwind->table_entry != NULL)
+    as_bad (_("missing .endp before .cfi_startproc"));
+
+  unwind->table_entry = NULL;
   unwind->data_bytes = -1;
 }
 
 static void
 tic6x_output_exidx_entry (void)
 {
-  static const char *const pr_names[] = {
-    "__c6xabi_unwind_cpp_pr0",
-    "__c6xabi_unwind_cpp_pr1",
-    "__c6xabi_unwind_cpp_pr2",
-    "__c6xabi_unwind_cpp_pr3",
-    "__c6xabi_unwind_cpp_pr4"
-  };
-
+  char *ptr;
+  long where;
+  unsigned int marked_pr_dependency;
+  segT old_seg;
+  subsegT old_subseg;
   tic6x_unwind_info *unwind = tic6x_get_unwind ();
+
   if (!unwind) {
     return;
   }
 
-  segT old_seg = now_seg;
-  subsegT old_subseg = now_subseg;
+  old_seg = now_seg;
+  old_subseg = now_subseg;
 
   tic6x_start_unwind_section (unwind->saved_seg, 1);
   frag_align (2, 0, 0);
   record_alignment (now_seg, 2);
 
-  char *ptr = frag_more (8);
+  ptr = frag_more (8);
+  if (!ptr) {
+    subseg_set (old_seg, old_subseg);
+    return;
+  }
+  
   memset (ptr, 0, 8);
-  long where = frag_now_fix () - 8;
+  where = frag_now_fix () - 8;
 
   fix_new (frag_now, where, 4, unwind->function_start, 0, 1,
            BFD_RELOC_C6000_PREL31);
 
-  if (unwind->personality_index >= 0 && unwind->personality_index < 5) {
-    unsigned int marked_pr_dependency = 
-      seg_info (now_seg)->tc_segment_info_data.marked_pr_dependency;
-    unsigned int mask = 1U << unwind->personality_index;
-    
-    if (!(marked_pr_dependency & mask)) {
-      symbolS *pr = symbol_find_or_make (pr_names[unwind->personality_index]);
+  marked_pr_dependency = seg_info (now_seg)->tc_segment_info_data.marked_pr_dependency;
+  
+  if (unwind->personality_index >= 0 && unwind->personality_index < 5
+      && !(marked_pr_dependency & (1 << unwind->personality_index)))
+    {
+      static const char *const personality_names[] =
+        {
+          "__c6xabi_unwind_cpp_pr0",
+          "__c6xabi_unwind_cpp_pr1",
+          "__c6xabi_unwind_cpp_pr2",
+          "__c6xabi_unwind_cpp_pr3",
+          "__c6xabi_unwind_cpp_pr4"
+        };
+      symbolS *pr = symbol_find_or_make (personality_names[unwind->personality_index]);
       fix_new (frag_now, where, 0, pr, 0, 1, BFD_RELOC_NONE);
-      seg_info (now_seg)->tc_segment_info_data.marked_pr_dependency |= mask;
+      seg_info (now_seg)->tc_segment_info_data.marked_pr_dependency
+        |= 1 << unwind->personality_index;
     }
-  }
 
-  if (unwind->table_entry) {
-    fix_new (frag_now, where + 4, 4, unwind->table_entry, 0, 1,
-             BFD_RELOC_C6000_PREL31);
-  } else {
-    md_number_to_chars (ptr + 4, unwind->data, 4);
-  }
+  if (unwind->table_entry)
+    {
+      fix_new (frag_now, where + 4, 4, unwind->table_entry, 0, 1,
+               BFD_RELOC_C6000_PREL31);
+    }
+  else
+    {
+      md_number_to_chars (ptr + 4, unwind->data, 4);
+    }
 
   subseg_set (old_seg, old_subseg);
 }
@@ -4869,7 +4915,6 @@ tic6x_output_unwinding (bool need_extab)
     }
 
   unwind->table_entry = NULL;
-  
   if (unwind->personality_index == 3 || unwind->personality_index == 4)
     {
       if (cfa_offset >= MAX_COMPACT_SP_OFFSET)
@@ -4877,19 +4922,15 @@ tic6x_output_unwinding (bool need_extab)
           as_bad (_("stack pointer offset too large for personality routine"));
           return;
         }
-      
-      bool invalid_layout = reg_saved_mask ||
-                           (unwind->personality_index == 3 && compact_mask != 0) ||
-                           (unwind->personality_index == 4 && safe_mask != 0);
-      
-      if (invalid_layout)
+      if (reg_saved_mask
+          || (unwind->personality_index == 3 && compact_mask != 0)
+          || (unwind->personality_index == 4 && safe_mask != 0))
         {
           as_bad (_("stack frame layout does not match personality routine"));
           return;
         }
 
       unwind->data = (1u << 31) | (unwind->personality_index << 24);
-      
       if (unwind->cfa_reg == 15)
         unwind->data |= 0x7f << 17;
       else
@@ -4899,7 +4940,6 @@ tic6x_output_unwinding (bool need_extab)
         unwind->data |= safe_mask << 4;
       else
         unwind->data |= compact_mask << 4;
-      
       unwind->data |= unwind->return_reg;
       unwind->data_bytes = 4;
     }
@@ -4926,7 +4966,9 @@ tic6x_output_unwinding (bool need_extab)
         }
 
       if (unwind->return_reg != UNWIND_B3)
-        tic6x_unwind_byte (UNWIND_OP_RET | unwind->return_reg);
+        {
+          tic6x_unwind_byte (UNWIND_OP_RET | unwind->return_reg);
+        }
 
       if (unwind->cfa_reg == 15)
         {
@@ -4965,7 +5007,6 @@ tic6x_output_unwinding (bool need_extab)
 
           tic6x_unwind_byte (UNWIND_OP_POP_REG | unwind->saved_reg_count);
           last_val = 0;
-          
           for (cur_offset = 0; unwind->saved_reg_count > 0; cur_offset -= 4)
             {
               val = 0xf;
@@ -4981,13 +5022,11 @@ tic6x_output_unwinding (bool need_extab)
                       break;
                     }
                 }
-              
               if ((cur_offset & 4) == 4)
                 tic6x_unwind_byte ((last_val << 4) | val);
               else
                 last_val = val;
             }
-          
           if ((cur_offset & 4) == 4)
             tic6x_unwind_byte ((last_val << 4) | 0xf);
         }
@@ -5002,8 +5041,10 @@ tic6x_output_unwinding (bool need_extab)
   if (need_extab && !unwind->table_entry)
     {
       if (unwind->data_bytes != 4)
-        abort ();
-
+        {
+          as_bad (_("internal error: invalid data bytes count"));
+          return;
+        }
       tic6x_flush_unwind_word (unwind->data);
     }
   else if (unwind->table_entry && !need_extab)
@@ -5016,7 +5057,10 @@ tic6x_output_unwinding (bool need_extab)
     {
       valueT tmp;
       if (unwind->data_bytes > 0x400)
-        as_bad (_("too many unwinding instructions"));
+        {
+          as_bad (_("too many unwinding instructions"));
+          return;
+        }
 
       if (unwind->personality_index == -1)
         {
@@ -5031,7 +5075,6 @@ tic6x_output_unwinding (bool need_extab)
           md_number_to_chars (unwind->frag_start, tmp, 4);
         }
     }
-  
   tic6x_output_exidx_entry ();
 }
 
@@ -5049,6 +5092,10 @@ tic6x_cfi_endproc (struct fde_entry *fde)
   offsetT cfa_offset = 0;
   offsetT save_offset = 0;
 
+  if (!unwind || !fde) {
+    return;
+  }
+
   unwind->cfa_reg = 31;
   unwind->return_reg = UNWIND_B3;
   unwind->saved_reg_count = 0;
@@ -5056,265 +5103,308 @@ tic6x_cfi_endproc (struct fde_entry *fde)
   unwind->saved_seg = now_seg;
   unwind->saved_subseg = now_subseg;
 
-  for (reg = 0; reg < TIC6X_NUM_UNWIND_REGS; reg++)
+  for (reg = 0; reg < TIC6X_NUM_UNWIND_REGS; reg++) {
     unwind->reg_saved[reg] = false;
+  }
 
-  for (insn = fde->data; insn; insn = insn->next)
-    {
-      switch (insn->insn)
-        {
-        case DW_CFA_advance_loc:
-          break;
-
-        case DW_CFA_def_cfa:
-          unwind->cfa_reg = insn->u.ri.reg;
-          cfa_offset = insn->u.ri.offset;
-          break;
-
-        case DW_CFA_def_cfa_register:
-          unwind->cfa_reg = insn->u.r;
-          break;
-
-        case DW_CFA_def_cfa_offset:
-          cfa_offset = insn->u.i;
-          break;
-
-        case DW_CFA_undefined:
-        case DW_CFA_same_value:
-          reg = tic6x_unwind_reg_from_dwarf (insn->u.r);
-          if (reg >= 0)
-            unwind->reg_saved[reg] = false;
-          break;
-
-        case DW_CFA_offset:
-          reg = tic6x_unwind_reg_from_dwarf (insn->u.ri.reg);
-          if (reg < 0)
-            {
-              as_bad (_("unable to generate unwinding opcode for reg %d"),
-                      insn->u.ri.reg);
-              return;
-            }
-          unwind->reg_saved[reg] = true;
-          unwind->reg_offset[reg] = insn->u.ri.offset;
-          if (insn->u.ri.reg == UNWIND_B3)
-            unwind->return_reg = UNWIND_B3;
-          break;
-
-        case DW_CFA_register:
-          if (insn->u.rr.reg1 != 19)
-            {
-              as_bad (_("unable to generate unwinding opcode for reg %d"),
-                      insn->u.rr.reg1);
-              return;
-            }
-
-          reg = tic6x_unwind_reg_from_dwarf (insn->u.rr.reg2);
-          if (reg < 0)
-            {
-              as_bad (_("unable to generate unwinding opcode for reg %d"),
-                      insn->u.rr.reg2);
-              return;
-            }
-
-          unwind->return_reg = reg;
-          unwind->reg_saved[UNWIND_B3] = false;
-          if (unwind->reg_saved[reg])
-            {
-              as_bad (_("unable to restore return address from "
-                        "previously restored reg"));
-              return;
-            }
-          break;
-
-        case DW_CFA_restore:
-        case DW_CFA_remember_state:
-        case DW_CFA_restore_state:
-        case DW_CFA_GNU_window_save:
-        case CFI_escape:
-        case CFI_val_encoded_addr:
-          as_bad (_("unhandled CFA insn for unwinding (%d)"), insn->insn);
-          break;
-
-        default:
-          abort ();
-        }
-    }
-
-  if (unwind->cfa_reg != 15 && unwind->cfa_reg != 31)
-    {
-      as_bad (_("unable to generate unwinding opcode for frame pointer reg %d"),
-              unwind->cfa_reg);
+  for (insn = fde->data; insn; insn = insn->next) {
+    if (tic6x_process_cfi_instruction(insn, unwind, &cfa_offset)) {
       return;
     }
+  }
 
-  if (unwind->cfa_reg == 15)
-    {
-      if (cfa_offset != 0)
-        {
-          as_bad (_("unable to generate unwinding opcode for "
-                    "frame pointer offset"));
-          return;
-        }
+  if (tic6x_validate_cfa_register(unwind, cfa_offset)) {
+    return;
+  }
+
+  for (reg = 0; reg < TIC6X_NUM_UNWIND_REGS; reg++) {
+    if (unwind->reg_saved[reg]) {
+      reg_saved_mask |= 1 << (TIC6X_NUM_UNWIND_REGS - (reg + 1));
     }
-  else if ((cfa_offset & 7) != 0)
-    {
-      as_bad (_("unwound stack pointer not doubleword aligned"));
+  }
+
+  if (reg_saved_mask) {
+    if (tic6x_check_safe_debug_layout(unwind, reg_saved_mask, &safe_mask)) {
+      reg_saved_mask = 0;
+    }
+  }
+
+  if (reg_saved_mask) {
+    if (tic6x_check_compact_layout(unwind, reg_saved_mask, &compact_mask)) {
+      reg_saved_mask = 0;
+    }
+  }
+
+  if (reg_saved_mask == 0x17ff) {
+    if (tic6x_check_pop_rts_format(unwind)) {
+      unwind->pop_rts = true;
+      reg_saved_mask = 0;
+    }
+  }
+
+  if (reg_saved_mask) {
+    if (tic6x_handle_manual_frame_description(unwind, &save_offset)) {
       return;
     }
-
-  for (reg = 0; reg < TIC6X_NUM_UNWIND_REGS; reg++)
-    {
-      if (unwind->reg_saved[reg])
-        reg_saved_mask |= 1 << (TIC6X_NUM_UNWIND_REGS - (reg + 1));
-    }
-
-  if (reg_saved_mask)
-    {
-      save_offset = 0;
-      for (reg = 0; reg < TIC6X_NUM_UNWIND_REGS; reg++)
-        {
-          if (!unwind->reg_saved[reg])
-            continue;
-
-          if (target_big_endian
-              && reg < TIC6X_NUM_UNWIND_REGS - 1
-              && unwind->reg_saved[reg + 1]
-              && tic6x_unwind_frame_regs[reg]
-                  == tic6x_unwind_frame_regs[reg + 1] + 1
-              && (tic6x_unwind_frame_regs[reg] & 1) == 1
-              && (save_offset & 4) == 4)
-            {
-              if (save_offset != unwind->reg_offset[reg + 1]
-                  || save_offset - 4 != unwind->reg_offset[reg])
-                break;
-              save_offset -= 8;
-              reg++;
-            }
-          else
-            {
-              if (save_offset != unwind->reg_offset[reg])
-                break;
-              save_offset -= 4;
-            }
-        }
-      if (reg == TIC6X_NUM_UNWIND_REGS)
-        {
-          safe_mask = reg_saved_mask;
-          reg_saved_mask = 0;
-        }
-    }
-
-  if (reg_saved_mask)
-    {
-      save_offset = 0;
-      for (reg = 0; reg < TIC6X_NUM_UNWIND_REGS; reg++)
-        {
-          int reg2;
-
-          if (!unwind->reg_saved[reg])
-            continue;
-
-          if (reg < TIC6X_NUM_UNWIND_REGS - 1)
-            {
-              reg2 = reg + 1;
-
-              if (!unwind->reg_saved[reg2]
-                  || tic6x_unwind_frame_regs[reg]
-                      != tic6x_unwind_frame_regs[reg2] + 1
-                  || (tic6x_unwind_frame_regs[reg2] & 1) != 0
-                  || save_offset == 0)
-                reg2 = -1;
-            }
-          else
-            reg2 = -1;
-
-          if (reg2 >= 0)
-            {
-              int high_offset = target_big_endian ? 4 : 0;
-
-              if (save_offset + 4 - high_offset != unwind->reg_offset[reg]
-                  || save_offset + high_offset != unwind->reg_offset[reg2])
-                {
-                  break;
-                }
-              reg++;
-            }
-          else
-            {
-              if (save_offset != unwind->reg_offset[reg])
-                break;
-            }
-          save_offset -= 8;
-        }
-
-      if (reg == TIC6X_NUM_UNWIND_REGS)
-        {
-          compact_mask = reg_saved_mask;
-          reg_saved_mask = 0;
-        }
-    }
-
-  if (reg_saved_mask == 0x17ff)
-    {
-      const int *pop_rts_offset = target_big_endian
-                                ? tic6x_pop_rts_offset_big
-                                : tic6x_pop_rts_offset_little;
-
-      save_offset = 0;
-      for (reg = 0; reg < TIC6X_NUM_UNWIND_REGS; reg++)
-        {
-          if (reg == UNWIND_B15)
-            continue;
-
-          if (unwind->reg_offset[reg] != pop_rts_offset[reg] * 4)
-            break;
-        }
-
-      if (reg == TIC6X_NUM_UNWIND_REGS)
-        {
-          unwind->pop_rts = true;
-          reg_saved_mask = 0;
-        }
-    }
-
-  if (reg_saved_mask)
-    {
-      save_offset = 0;
-
-      for (reg = 0; reg < TIC6X_NUM_UNWIND_REGS; reg++)
-        {
-          if (!unwind->reg_saved[reg])
-            continue;
-
-          unwind->saved_reg_count++;
-          
-          if (unwind->reg_offset[reg] > 0 || unwind->reg_offset[reg] < -0x800
-              || (unwind->reg_offset[reg] & 3) != 0)
-            {
-              as_bad (_("stack frame layout too complex for unwinder"));
-              return;
-            }
-
-          if (unwind->reg_offset[reg] < save_offset)
-            save_offset = unwind->reg_offset[reg] - 4;
-        }
-    }
+  }
 
   save_offset &= ~7;
 
-  if (unwind->cfa_reg == 31 && !reg_saved_mask)
-    {
-      cfa_offset += save_offset;
-      if (cfa_offset < 0)
-        {
-          as_bad (_("unwound frame has negative size"));
-          return;
-        }
+  if (unwind->cfa_reg == 31 && !reg_saved_mask) {
+    cfa_offset += save_offset;
+    if (cfa_offset < 0) {
+      as_bad (_("unwound frame has negative size"));
+      return;
     }
+  }
 
   unwind->safe_mask = safe_mask;
   unwind->compact_mask = compact_mask;
   unwind->reg_saved_mask = reg_saved_mask;
   unwind->cfa_offset = cfa_offset;
   unwind->function_start = fde->start_address;
+}
+
+static int
+tic6x_process_cfi_instruction(struct cfi_insn_data *insn, tic6x_unwind_info *unwind, offsetT *cfa_offset)
+{
+  int reg;
+
+  switch (insn->insn) {
+    case DW_CFA_advance_loc:
+      break;
+
+    case DW_CFA_def_cfa:
+      unwind->cfa_reg = insn->u.ri.reg;
+      *cfa_offset = insn->u.ri.offset;
+      break;
+
+    case DW_CFA_def_cfa_register:
+      unwind->cfa_reg = insn->u.r;
+      break;
+
+    case DW_CFA_def_cfa_offset:
+      *cfa_offset = insn->u.i;
+      break;
+
+    case DW_CFA_undefined:
+    case DW_CFA_same_value:
+      reg = tic6x_unwind_reg_from_dwarf(insn->u.r);
+      if (reg >= 0 && reg < TIC6X_NUM_UNWIND_REGS) {
+        unwind->reg_saved[reg] = false;
+      }
+      break;
+
+    case DW_CFA_offset:
+      return tic6x_handle_offset_instruction(insn, unwind);
+
+    case DW_CFA_register:
+      return tic6x_handle_register_instruction(insn, unwind);
+
+    case DW_CFA_restore:
+    case DW_CFA_remember_state:
+    case DW_CFA_restore_state:
+    case DW_CFA_GNU_window_save:
+    case CFI_escape:
+    case CFI_val_encoded_addr:
+      as_bad (_("unhandled CFA insn for unwinding (%d)"), insn->insn);
+      break;
+
+    default:
+      as_bad (_("unknown CFA instruction (%d)"), insn->insn);
+      return 1;
+  }
+  return 0;
+}
+
+static int
+tic6x_handle_offset_instruction(struct cfi_insn_data *insn, tic6x_unwind_info *unwind)
+{
+  int reg = tic6x_unwind_reg_from_dwarf(insn->u.ri.reg);
+  if (reg < 0 || reg >= TIC6X_NUM_UNWIND_REGS) {
+    as_bad (_("unable to generate unwinding opcode for reg %d"), insn->u.ri.reg);
+    return 1;
+  }
+  unwind->reg_saved[reg] = true;
+  unwind->reg_offset[reg] = insn->u.ri.offset;
+  if (insn->u.ri.reg == UNWIND_B3) {
+    unwind->return_reg = UNWIND_B3;
+  }
+  return 0;
+}
+
+static int
+tic6x_handle_register_instruction(struct cfi_insn_data *insn, tic6x_unwind_info *unwind)
+{
+  int reg;
+
+  if (insn->u.rr.reg1 != 19) {
+    as_bad (_("unable to generate unwinding opcode for reg %d"), insn->u.rr.reg1);
+    return 1;
+  }
+
+  reg = tic6x_unwind_reg_from_dwarf(insn->u.rr.reg2);
+  if (reg < 0 || reg >= TIC6X_NUM_UNWIND_REGS) {
+    as_bad (_("unable to generate unwinding opcode for reg %d"), insn->u.rr.reg2);
+    return 1;
+  }
+
+  unwind->return_reg = reg;
+  unwind->reg_saved[UNWIND_B3] = false;
+  if (unwind->reg_saved[reg]) {
+    as_bad (_("unable to restore return address from previously restored reg"));
+    return 1;
+  }
+  return 0;
+}
+
+static int
+tic6x_validate_cfa_register(tic6x_unwind_info *unwind, offsetT cfa_offset)
+{
+  if (unwind->cfa_reg != 15 && unwind->cfa_reg != 31) {
+    as_bad (_("unable to generate unwinding opcode for frame pointer reg %d"), unwind->cfa_reg);
+    return 1;
+  }
+
+  if (unwind->cfa_reg == 15) {
+    if (cfa_offset != 0) {
+      as_bad (_("unable to generate unwinding opcode for frame pointer offset"));
+      return 1;
+    }
+  } else {
+    if ((cfa_offset & 7) != 0) {
+      as_bad (_("unwound stack pointer not doubleword aligned"));
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static int
+tic6x_check_safe_debug_layout(tic6x_unwind_info *unwind, unsigned reg_saved_mask, unsigned *safe_mask)
+{
+  offsetT save_offset = 0;
+  int reg;
+
+  for (reg = 0; reg < TIC6X_NUM_UNWIND_REGS; reg++) {
+    if (!unwind->reg_saved[reg]) {
+      continue;
+    }
+
+    if (target_big_endian && reg < TIC6X_NUM_UNWIND_REGS - 1 &&
+        unwind->reg_saved[reg + 1] &&
+        tic6x_unwind_frame_regs[reg] == tic6x_unwind_frame_regs[reg + 1] + 1 &&
+        (tic6x_unwind_frame_regs[reg] & 1) == 1 &&
+        (save_offset & 4) == 4) {
+      if (save_offset != unwind->reg_offset[reg + 1] ||
+          save_offset - 4 != unwind->reg_offset[reg]) {
+        break;
+      }
+      save_offset -= 8;
+      reg++;
+    } else {
+      if (save_offset != unwind->reg_offset[reg]) {
+        break;
+      }
+      save_offset -= 4;
+    }
+  }
+
+  if (reg == TIC6X_NUM_UNWIND_REGS) {
+    *safe_mask = reg_saved_mask;
+    return 1;
+  }
+  return 0;
+}
+
+static int
+tic6x_check_compact_layout(tic6x_unwind_info *unwind, unsigned reg_saved_mask, unsigned *compact_mask)
+{
+  offsetT save_offset = 0;
+  int reg;
+
+  for (reg = 0; reg < TIC6X_NUM_UNWIND_REGS; reg++) {
+    int reg2;
+    int high_offset;
+
+    if (!unwind->reg_saved[reg]) {
+      continue;
+    }
+
+    if (reg < TIC6X_NUM_UNWIND_REGS - 1) {
+      reg2 = reg + 1;
+      if (!unwind->reg_saved[reg2] ||
+          tic6x_unwind_frame_regs[reg] != tic6x_unwind_frame_regs[reg2] + 1 ||
+          (tic6x_unwind_frame_regs[reg2] & 1) != 0 ||
+          save_offset == 0) {
+        reg2 = -1;
+      }
+    } else {
+      reg2 = -1;
+    }
+
+    if (reg2 >= 0) {
+      high_offset = target_big_endian ? 4 : 0;
+      if (save_offset + 4 - high_offset != unwind->reg_offset[reg] ||
+          save_offset + high_offset != unwind->reg_offset[reg2]) {
+        break;
+      }
+      reg++;
+    } else {
+      if (save_offset != unwind->reg_offset[reg]) {
+        break;
+      }
+    }
+    save_offset -= 8;
+  }
+
+  if (reg == TIC6X_NUM_UNWIND_REGS) {
+    *compact_mask = reg_saved_mask;
+    return 1;
+  }
+  return 0;
+}
+
+static int
+tic6x_check_pop_rts_format(tic6x_unwind_info *unwind)
+{
+  const int *pop_rts_offset = target_big_endian ? tic6x_pop_rts_offset_big : tic6x_pop_rts_offset_little;
+  int reg;
+
+  for (reg = 0; reg < TIC6X_NUM_UNWIND_REGS; reg++) {
+    if (reg == UNWIND_B15) {
+      continue;
+    }
+    if (unwind->reg_offset[reg] != pop_rts_offset[reg] * 4) {
+      break;
+    }
+  }
+
+  return (reg == TIC6X_NUM_UNWIND_REGS);
+}
+
+static int
+tic6x_handle_manual_frame_description(tic6x_unwind_info *unwind, offsetT *save_offset)
+{
+  int reg;
+
+  *save_offset = 0;
+  for (reg = 0; reg < TIC6X_NUM_UNWIND_REGS; reg++) {
+    if (!unwind->reg_saved[reg]) {
+      continue;
+    }
+
+    unwind->saved_reg_count++;
+    if (unwind->reg_offset[reg] > 0 || 
+        unwind->reg_offset[reg] < -0x800 ||
+        (unwind->reg_offset[reg] & 3) != 0) {
+      as_bad (_("stack frame layout too complex for unwinder"));
+      return 1;
+    }
+
+    if (unwind->reg_offset[reg] < *save_offset) {
+      *save_offset = unwind->reg_offset[reg] - 4;
+    }
+  }
+  return 0;
 }
